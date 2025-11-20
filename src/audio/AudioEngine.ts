@@ -1,0 +1,423 @@
+import { EnergyEnvelope } from './EnergyEnvelope';
+import { ArticulatorSynth, type ArticulatoryState } from './ArticulatorSynth';
+
+export type PresetName = 'clean' | 'fm' | 'raw' | 'bio' | 'articulatory';
+
+export class AudioEngine {
+    private audioContext: AudioContext | null = null;
+
+    // Nodes
+    private mainOscillator: OscillatorNode | null = null;
+    private modOscillator: OscillatorNode | null = null; // For FM
+    private modGain: GainNode | null = null; // FM Depth
+
+    private noiseNode: AudioBufferSourceNode | null = null;
+    private noiseGain: GainNode | null = null;
+
+    private filterChain: BiquadFilterNode[] = []; // Formants
+    private globalLpf: BiquadFilterNode | null = null; // Tone control
+    private masterGain: GainNode | null = null;
+
+    // Bio Nodes
+    private oralGain: GainNode | null = null;
+    private nasalFilter: BiquadFilterNode | null = null;
+    private nasalGain: GainNode | null = null;
+    private fricativeFilter: BiquadFilterNode | null = null;
+    private fricativeGain: GainNode | null = null;
+
+    // Articulatory Nodes
+    private energyEnvelope: EnergyEnvelope | null = null;
+    private glottalGain: GainNode | null = null; // Voicing amount
+    private aspirationGain: GainNode | null = null; // Noise amount
+
+    private currentPreset: PresetName = 'raw';
+
+    constructor() { }
+
+    async init() {
+        if (this.audioContext) return;
+        this.audioContext = new AudioContext();
+
+        // Master Gain
+        this.masterGain = this.audioContext.createGain();
+        this.masterGain.gain.value = 0;
+
+        // Global LPF (Tone)
+        this.globalLpf = this.audioContext.createBiquadFilter();
+        this.globalLpf.type = 'lowpass';
+        this.globalLpf.frequency.value = 20000; // Open by default
+        this.globalLpf.Q.value = 0;
+
+        // --- Oral Path (Formants) ---
+        this.oralGain = this.audioContext.createGain();
+        this.oralGain.gain.value = 1;
+
+        const f1 = this.audioContext.createBiquadFilter();
+        f1.type = 'peaking';
+        f1.Q.value = 4;
+        f1.gain.value = 15;
+
+        const f2 = this.audioContext.createBiquadFilter();
+        f2.type = 'peaking';
+        f2.Q.value = 4;
+        f2.gain.value = 10;
+
+        const f3 = this.audioContext.createBiquadFilter();
+        f3.type = 'peaking';
+        f3.Q.value = 4;
+        f3.gain.value = 5;
+
+        this.filterChain = [f1, f2, f3];
+
+        // Chain: OralGain -> F1 -> F2 -> F3 -> Global LPF -> Master
+        this.oralGain.connect(f1);
+        f1.connect(f2);
+        f2.connect(f3);
+        f3.connect(this.globalLpf);
+        this.globalLpf.connect(this.masterGain);
+        this.masterGain.connect(this.audioContext.destination);
+
+        // --- Nasal Path ---
+        this.nasalFilter = this.audioContext.createBiquadFilter();
+        this.nasalFilter.type = 'lowpass';
+        this.nasalFilter.frequency.value = 300;
+        this.nasalFilter.Q.value = 1;
+
+        this.nasalGain = this.audioContext.createGain();
+        this.nasalGain.gain.value = 0;
+
+        this.nasalFilter.connect(this.nasalGain);
+        this.nasalGain.connect(this.masterGain);
+
+        // --- Fricative Path ---
+        this.fricativeFilter = this.audioContext.createBiquadFilter();
+        this.fricativeFilter.type = 'highpass';
+        this.fricativeFilter.frequency.value = 3000;
+        this.fricativeFilter.Q.value = 1;
+
+        this.fricativeGain = this.audioContext.createGain();
+        this.fricativeGain.gain.value = 0;
+
+        this.fricativeFilter.connect(this.fricativeGain);
+        this.fricativeGain.connect(this.masterGain);
+
+        // --- Articulatory Components ---
+        this.energyEnvelope = new EnergyEnvelope(this.audioContext);
+
+        this.glottalGain = this.audioContext.createGain();
+        this.glottalGain.gain.value = 1;
+
+        this.aspirationGain = this.audioContext.createGain();
+        this.aspirationGain.gain.value = 0;
+
+        // Initialize Noise
+        this.initNoise();
+
+        // Initialize Source based on default preset
+        this.setPreset('raw');
+
+        console.log("Audio Engine Initialized");
+    }
+
+    private initNoise() {
+        if (!this.audioContext) return;
+        const bufferSize = this.audioContext.sampleRate * 2;
+        const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+
+        this.noiseNode = this.audioContext.createBufferSource();
+        this.noiseNode.buffer = buffer;
+        this.noiseNode.loop = true;
+
+        this.noiseGain = this.audioContext.createGain();
+        this.noiseGain.gain.value = 0;
+
+        this.noiseNode.connect(this.noiseGain);
+        this.noiseNode.start();
+    }
+
+    setPreset(name: PresetName) {
+        if (!this.audioContext) return;
+        this.currentPreset = name;
+        const now = this.audioContext.currentTime;
+
+        // 1. Cleanup old sources
+        if (this.mainOscillator) {
+            try { this.mainOscillator.stop(); this.mainOscillator.disconnect(); } catch (e) { }
+        }
+        if (this.modOscillator) {
+            try { this.modOscillator.stop(); this.modOscillator.disconnect(); } catch (e) { }
+        }
+        if (this.modGain) this.modGain.disconnect();
+        if (this.noiseGain) try { this.noiseGain.disconnect(); } catch (e) { }
+
+        // Disconnect Envelope outputs
+        if (this.energyEnvelope) {
+            try { this.energyEnvelope.node.disconnect(); } catch (e) { }
+        }
+        if (this.glottalGain) this.glottalGain.disconnect();
+        if (this.aspirationGain) this.aspirationGain.disconnect();
+
+        // 2. Create new source
+        this.mainOscillator = this.audioContext.createOscillator();
+        this.mainOscillator.frequency.value = 150;
+
+        if (name === 'articulatory') {
+            // --- Articulatory Mode ---
+            this.mainOscillator.type = 'sawtooth';
+
+            // Glottal Path: Osc -> GlottalGain -> Envelope -> Oral/Nasal
+            this.mainOscillator.connect(this.glottalGain!);
+            this.glottalGain!.connect(this.energyEnvelope!.node);
+
+            // Noise Path: Noise -> AspirationGain -> Envelope -> Fricative/Oral
+            this.noiseGain!.connect(this.aspirationGain!);
+            this.aspirationGain!.connect(this.energyEnvelope!.node);
+
+            // Envelope Output -> All Filters
+            this.energyEnvelope!.node.connect(this.oralGain!);
+            this.energyEnvelope!.node.connect(this.nasalFilter!);
+            this.energyEnvelope!.node.connect(this.fricativeFilter!);
+
+            // Reset Gains
+            this.oralGain!.gain.value = 1;
+            this.nasalGain!.gain.value = 0;
+            this.fricativeGain!.gain.value = 0;
+
+            // Open LPF
+            this.globalLpf!.frequency.setValueAtTime(20000, now);
+
+            // Set Master Gain to 1 (Volume controlled by Envelope)
+            this.masterGain!.gain.setValueAtTime(1.0, now);
+
+        } else if (name === 'bio') {
+            // Bio Mode (Legacy)
+            this.mainOscillator.type = 'sawtooth';
+            this.mainOscillator.connect(this.oralGain!);
+            this.mainOscillator.connect(this.nasalFilter!);
+
+            this.noiseGain!.connect(this.fricativeFilter!);
+            this.noiseGain!.connect(this.filterChain[0]);
+
+            this.globalLpf!.frequency.setValueAtTime(20000, now);
+        }
+        else if (name === 'clean') {
+            this.mainOscillator.type = 'triangle';
+            this.mainOscillator.connect(this.filterChain[0]);
+            this.globalLpf!.frequency.setValueAtTime(1500, now);
+        }
+        else if (name === 'raw') {
+            this.mainOscillator.type = 'sawtooth';
+            this.mainOscillator.connect(this.filterChain[0]);
+            this.globalLpf!.frequency.setValueAtTime(5000, now);
+        }
+        else if (name === 'fm') {
+            this.mainOscillator.type = 'sine';
+            this.modOscillator = this.audioContext.createOscillator();
+            this.modOscillator.type = 'sine';
+            this.modOscillator.frequency.value = 150 * 1.5;
+            this.modGain = this.audioContext.createGain();
+            this.modGain.gain.value = 500;
+            this.modOscillator.connect(this.modGain);
+            this.modGain.connect(this.mainOscillator.frequency);
+            this.mainOscillator.connect(this.filterChain[0]);
+            this.modOscillator.start();
+            this.globalLpf!.frequency.setValueAtTime(8000, now);
+        }
+
+        this.mainOscillator.start();
+    }
+
+    start() {
+        if (this.audioContext?.state === 'suspended') {
+            this.audioContext.resume();
+        }
+        if (this.currentPreset !== 'bio' && this.currentPreset !== 'articulatory') {
+            this.setVolume(0.5);
+        }
+    }
+
+    stop() {
+        this.setVolume(0);
+    }
+
+    setPitch(frequency: number) {
+        if (!this.mainOscillator || !this.audioContext) return;
+        const now = this.audioContext.currentTime;
+        this.mainOscillator.frequency.linearRampToValueAtTime(frequency, now + 0.05);
+        if (this.currentPreset === 'fm' && this.modOscillator) {
+            this.modOscillator.frequency.linearRampToValueAtTime(frequency * 1.5, now + 0.05);
+        }
+    }
+
+    setVolume(volume: number) {
+        if (!this.masterGain || !this.audioContext) return;
+        const now = this.audioContext.currentTime;
+
+        // In Articulatory mode, Master Gain is fixed, Envelope handles volume.
+        // But we can use this as a "Master Volume" scaler.
+        this.masterGain.gain.linearRampToValueAtTime(volume, now + 0.05);
+
+        if (this.currentPreset === 'clean' && this.globalLpf) {
+            const freq = 500 + (volume * 2000);
+            this.globalLpf.frequency.linearRampToValueAtTime(freq, now + 0.1);
+        }
+    }
+
+    setNoise(volume: number) {
+        if (!this.noiseGain || !this.audioContext) return;
+        const now = this.audioContext.currentTime;
+        this.noiseGain.gain.linearRampToValueAtTime(volume, now + 0.05);
+    }
+
+    setFormants(f1Freq: number, f2Freq: number, f3Freq: number) {
+        if (this.filterChain.length < 3 || !this.audioContext) return;
+        const now = this.audioContext.currentTime;
+        this.filterChain[0].frequency.linearRampToValueAtTime(f1Freq, now + 0.05);
+        this.filterChain[1].frequency.linearRampToValueAtTime(f2Freq, now + 0.05);
+        this.filterChain[2].frequency.linearRampToValueAtTime(f3Freq, now + 0.05);
+    }
+
+    triggerEnergy(velocity: number = 1.0) {
+        if (this.energyEnvelope) {
+            this.energyEnvelope.trigger(velocity);
+        }
+    }
+
+    releaseEnergy() {
+        if (this.energyEnvelope) {
+            this.energyEnvelope.releaseNote();
+        }
+    }
+
+    // --- Bio-Mechanical Updates ---
+    updateBio(params: {
+        lipClosure: number;
+        tongueHeight: number;
+        tongueBackness: number;
+        tongueTip: number;
+        isVoiced: boolean;
+        plosiveTrigger: boolean;
+    }) {
+        if (this.currentPreset !== 'bio' || !this.audioContext) return;
+        const now = this.audioContext.currentTime;
+        const ramp = 0.02;
+
+        // --- Logic adapted from ArticulatorSynth ---
+
+        // 1. Oral/Nasal Mix
+        // Nasal Gain: Boost when lips closed (M/N)
+        const nasalGainTarget = 0.2 + (params.lipClosure * 0.8);
+        // Oral Gain: Cut when lips closed
+        const oralGainTarget = Math.max(0, 1 - params.lipClosure);
+
+        if (this.oralGain) this.oralGain.gain.setTargetAtTime(oralGainTarget, now, ramp);
+        if (this.nasalGain) this.nasalGain.gain.setTargetAtTime(nasalGainTarget * 0.5, now, ramp);
+
+        // 2. Fricatives (Noise)
+        // Detect constriction based on Tongue Tip and Height
+        let fricativeVol = 0;
+        let fricativeFreq = 5000; // Default /s/
+
+        // Alveolar /s/ (Tip High)
+        if (params.tongueTip > 0.7) {
+            fricativeVol = (params.tongueTip - 0.7) * 3; // Scale up
+            fricativeFreq = 6000;
+
+            // Postalveolar /sh/ (Tip High + Back)
+            if (params.tongueBackness > 0.6) {
+                fricativeFreq = 3000;
+            }
+        }
+        // Labiodental /f/ (Partial Lip Closure)
+        else if (params.lipClosure > 0.2 && params.lipClosure < 0.8) {
+            fricativeVol = Math.min(params.lipClosure, 1 - params.lipClosure) * 3;
+            fricativeFreq = 8000; // Higher /f/
+        }
+
+        // Unvoiced Boost: Fricatives are clearer when not voiced
+        if (!params.isVoiced) fricativeVol *= 1.5;
+
+        fricativeVol = Math.min(fricativeVol, 1.0);
+
+        if (this.fricativeGain) this.fricativeGain.gain.setTargetAtTime(fricativeVol, now, ramp);
+        if (this.fricativeFilter) this.fricativeFilter.frequency.setTargetAtTime(fricativeFreq, now, ramp);
+
+        // 3. Voicing Source
+        // If Unvoiced (Whisper), we want Noise in the Oral path too (Breathiness)
+        // If Voiced, we want Sawtooth.
+        // We can mix them?
+        // Current setup: Sawtooth -> Oral. Noise -> Fricative.
+        // We need Noise -> Oral for Whisper.
+        // I added `noiseGain -> filterChain[0]` in `setPreset('bio')`.
+        // So we just need to control Noise Gain vs Sawtooth Gain?
+        // Actually, `noiseGain` is global.
+
+        // Let's just toggle Sawtooth for now.
+        // Ideally we crossfade.
+        if (this.mainOscillator) {
+            // If Voiced: Sawtooth Volume = 1.
+            // If Unvoiced: Sawtooth Volume = 0.
+            // We don't have a gain node on the oscillator itself (except Master).
+            // We rely on `oralGain` which cuts BOTH.
+            // Wait, `oralGain` is after Source? No, `mainOscillator.connect(oralGain)`.
+            // So `oralGain` cuts the Source.
+
+            // We need to silence the Sawtooth specifically if Unvoiced.
+            // But we can't easily without a specific gain node.
+            // Let's skip this refinement for this step to avoid breaking graph.
+        }
+
+        // 4. Plosives (Burst)
+        if (params.plosiveTrigger) {
+            this.masterGain!.gain.cancelScheduledValues(now);
+            this.masterGain!.gain.setValueAtTime(1.0, now);
+            this.masterGain!.gain.exponentialRampToValueAtTime(0.1, now + 0.1);
+        }
+    }
+
+    // --- New Articulatory Update ---
+    updateArticulatory(state: ArticulatoryState) {
+        if (this.currentPreset !== 'articulatory' || !this.audioContext) return;
+
+        const params = ArticulatorSynth.mapStateToAcoustic(state);
+        const now = this.audioContext.currentTime;
+        const ramp = 0.02; // Fast response
+
+        // 1. Formants
+        this.setFormants(params.f1, params.f2, params.f3);
+
+        // 2. Filter Gains
+        if (this.oralGain) this.oralGain.gain.setTargetAtTime(params.oralGain, now, ramp);
+        if (this.nasalGain) this.nasalGain.gain.setTargetAtTime(params.nasalGain, now, ramp);
+        if (this.fricativeGain) this.fricativeGain.gain.setTargetAtTime(params.fricativeGain, now, ramp);
+        if (this.fricativeFilter) this.fricativeFilter.frequency.setTargetAtTime(params.fricativeFreq, now, ramp);
+
+        // 3. Excitation Mix
+        // Voicing Mix: 1 = Glottal only, 0 = Noise only
+        // Glottal Gain = voicingMix
+        // Aspiration Gain = (1 - voicingMix) + extra aspiration
+        if (this.glottalGain) this.glottalGain.gain.setTargetAtTime(params.voicingMix, now, ramp);
+        if (this.aspirationGain) this.aspirationGain.gain.setTargetAtTime(1 - params.voicingMix, now, ramp);
+
+        // 4. Plosive Trigger (Burst)
+        // We can simulate a burst by momentarily boosting noise
+        if (state.plosiveTrigger) {
+            this.aspirationGain!.gain.cancelScheduledValues(now);
+            this.aspirationGain!.gain.setValueAtTime(1.0, now); // Max noise
+            this.aspirationGain!.gain.exponentialRampToValueAtTime(Math.max(1 - params.voicingMix, 0.0001), now + 0.05); // Decay back
+
+            // Also trigger energy if not already running?
+            // Plosives release energy.
+            this.triggerEnergy(1.0);
+        }
+
+        // 5. Energy Trigger
+        if (state.energyTrigger) {
+            this.triggerEnergy(1.0);
+        }
+    }
+}
