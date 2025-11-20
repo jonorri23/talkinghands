@@ -306,12 +306,13 @@ export class AudioEngine {
         const now = this.audioContext.currentTime;
         const ramp = 0.02;
 
-        // 1. Oral/Nasal Mix
-        const oralLevel = (1 - params.lipClosure);
-        const nasalLevel = params.lipClosure;
+        // 1. Oral/Nasal Mix - Tuned for realistic speech
+        // Use exponential curve for more natural transition
+        const oralLevel = Math.pow(1 - params.lipClosure, 1.5); // Exponential falloff
+        const nasalLevel = Math.pow(params.lipClosure, 0.8);     // Gentler rise
 
         if (this.oralGain) this.oralGain.gain.setTargetAtTime(oralLevel, now, ramp);
-        if (this.nasalGain) this.nasalGain.gain.setTargetAtTime(nasalLevel * 0.5, now, ramp);
+        if (this.nasalGain) this.nasalGain.gain.setTargetAtTime(nasalLevel * 0.7, now, ramp); // Boost nasal
 
         // 2. Fricatives (Tongue Height) - now with tunable threshold
         let fricativeVol = 0;
@@ -355,21 +356,29 @@ export class AudioEngine {
         if (this.glottalGain) this.glottalGain.gain.setTargetAtTime(params.voicingMix, now, ramp);
         if (this.aspirationGain) this.aspirationGain.gain.setTargetAtTime(1 - params.voicingMix, now, ramp);
 
-        // 4. Plosive Trigger (Burst)
-        // We can simulate a burst by momentarily boosting noise
+        // 4. Plosive Trigger (Burst) - Using EnergyEnvelope
         if (state.plosiveTrigger) {
-            this.aspirationGain!.gain.cancelScheduledValues(now);
-            this.aspirationGain!.gain.setValueAtTime(1.0, now); // Max noise
-            this.aspirationGain!.gain.exponentialRampToValueAtTime(Math.max(1 - params.voicingMix, 0.0001), now + 0.05); // Decay back
+            // Set fast attack for burst
+            if (this.energyEnvelope) {
+                this.energyEnvelope.attack = 0.001; // Very fast
+                this.energyEnvelope.decay = 0.05;   // Quick decay
+                this.energyEnvelope.trigger(1.0);
+            }
 
-            // Also trigger energy if not already running?
-            // Plosives release energy.
-            this.triggerEnergy(1.0);
+            // Momentary noise burst for aspiration
+            this.aspirationGain!.gain.cancelScheduledValues(now);
+            this.aspirationGain!.gain.setValueAtTime(1.0, now);
+            this.aspirationGain!.gain.exponentialRampToValueAtTime(Math.max(1 - params.voicingMix, 0.0001), now + 0.05);
         }
 
-        // 5. Energy Trigger
+        // 5. Energy Trigger (Breath) - Using EnergyEnvelope
         if (state.energyTrigger) {
-            this.triggerEnergy(1.0);
+            // Set slower attack for natural breath onset
+            if (this.energyEnvelope) {
+                this.energyEnvelope.attack = 0.02;  // Natural breath start
+                this.energyEnvelope.decay = 0.3;    // Long sustain
+                this.energyEnvelope.trigger(1.0);
+            }
         }
     }
 }

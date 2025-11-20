@@ -13,18 +13,20 @@
     <h1>Vocal Tract Simulator</h1>
     <div class="controls">
       <button id="startBtn">Start Audio & Camera</button>
-      <select id="mode-selector">
-        <option value="advanced">Advanced (2D Vowel Space)</option>
-        <option value="simple">Simple (Open/Close)</option>
-      </select>
 
       <div class="preset-group">
+        <span>Mode:</span>
+        <button class="preset-btn" data-preset="simple">Simple (Open/Close)</button>
+        <button class="preset-btn active" data-preset="advanced">Advanced (2D Vowels)</button>
+        <button class="preset-btn" data-preset="bio">Bio (Speech Physics)</button>
+        <button class="preset-btn" data-preset="articulatory">Articulatory (Breath)</button>
+      </div>
+
+      <div class="sound-group">
         <span>Sound:</span>
-        <button class="preset-btn active" data-preset="raw">Raw</button>
-        <button class="preset-btn" data-preset="clean">Clean</button>
-        <button class="preset-btn" data-preset="fm">FM</button>
-        <button class="preset-btn" data-preset="bio">Bio (Real)</button>
-        <button class="preset-btn" data-preset="articulatory">Articulatory</button>
+        <button class="sound-btn active" data-sound="raw">Raw</button>
+        <button class="sound-btn" data-sound="clean">Clean</button>
+        <button class="sound-btn" data-sound="fm">FM</button>
       </div>
 
       <div class="tweaks" id="bio-tweaks" style="display: none;">

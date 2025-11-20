@@ -1,5 +1,5 @@
 import './style.css'
-import { AudioEngine, type PresetName } from './audio/AudioEngine';
+import { AudioEngine } from './audio/AudioEngine';
 import { HandTracker } from './vision/HandTracker';
 import { HandAnalyzer } from './vision/HandAnalyzer';
 import { VowelSpace } from './audio/VowelSpace';
@@ -11,40 +11,33 @@ const pitchValEl = document.getElementById('pitch-val') as HTMLSpanElement;
 const vowelValEl = document.getElementById('vowel-val') as HTMLSpanElement;
 const videoEl = document.getElementById('webcam') as HTMLVideoElement;
 const canvasEl = document.getElementById('output_canvas') as HTMLCanvasElement;
-const modeSelector = document.getElementById('mode-selector') as HTMLSelectElement;
 const presetBtns = document.querySelectorAll('.preset-btn');
+const soundBtns = document.querySelectorAll('.sound-btn');
 const perfToggle = document.getElementById('perf-mode') as HTMLInputElement;
 const latencyEl = document.getElementById('latency-display') as HTMLSpanElement;
 
 const audio = new AudioEngine();
 let tracker: HandTracker;
 
-let currentMode = 'advanced';
-let currentPreset: PresetName = 'raw';
+let currentMode: 'simple' | 'advanced' | 'bio' | 'articulatory' = 'advanced';
+let currentSound: 'raw' | 'clean' | 'fm' = 'raw';
 let isPerfMode = false;
 
 // Articulatory state tracking
 let lastBreathLevel = 0;
 
-// UI Event Listeners
-modeSelector.addEventListener('change', (e) => {
-  currentMode = (e.target as HTMLSelectElement).value;
-});
-
+// UI Event Listeners - Preset (Mode) Buttons
 presetBtns.forEach(btn => {
   btn.addEventListener('click', (e) => {
     const target = e.target as HTMLButtonElement;
-    const preset = target.dataset.preset as PresetName;
-    currentPreset = preset;
-
-    // Update Audio
-    audio.setPreset(preset);
+    const preset = target.dataset.preset as typeof currentMode;
+    currentMode = preset;
 
     // Update UI
     presetBtns.forEach(b => b.classList.remove('active'));
     target.classList.add('active');
 
-    // Show/Hide UI elements
+    // Show/Hide mode-specific UI
     const bioTweaks = document.getElementById('bio-tweaks');
     const artHint = document.querySelector('.articulatory-hint') as HTMLElement;
 
@@ -53,6 +46,24 @@ presetBtns.forEach(btn => {
       artHint.style.display = preset === 'articulatory' ? 'block' : 'none';
       artHint.innerText = "💡 TILT hand FORWARD to breathe out / speak";
     }
+  });
+});
+
+// UI Event Listeners - Sound (Waveform) Buttons
+soundBtns.forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    const target = e.target as HTMLButtonElement;
+    const sound = target.dataset.sound as typeof currentSound;
+    currentSound = sound;
+
+    // Update Audio Engine preset (only for non-bio modes)
+    if (currentMode !== 'bio' && currentMode !== 'articulatory') {
+      audio.setPreset(sound);
+    }
+
+    // Update UI
+    soundBtns.forEach(b => b.classList.remove('active'));
+    target.classList.add('active');
   });
 });
 
@@ -111,6 +122,20 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
   }
 
   const state = HandAnalyzer.analyze(data.landmarks);
+
+  // Active Zone Check - Ignore hands outside safe boundaries
+  // Safe zone: X [0.2, 0.8], Y [0.1, 0.9] to avoid edge artifacts
+  const inActiveZone = (
+    state.palmPosition.x > 0.15 && state.palmPosition.x < 0.85 &&
+    state.palmPosition.y > 0.1 && state.palmPosition.y < 0.9
+  );
+
+  if (!inActiveZone) {
+    // Hand is outside active zone, mute or hold last state
+    audio.setVolume(0);
+    return;
+  }
+
   const ctx = canvasEl.getContext('2d')!;
 
   // 1. Pitch: Wrist Y (Inverted)
@@ -125,7 +150,7 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
   // 3. Vowel Mapping based on Mode
   let f1, f2, f3, vowelName;
 
-  if (currentPreset === 'articulatory') {
+  if (currentMode === 'articulatory') {
     // --- Articulatory Mode ---
     const lipClosure = Math.min(Math.max((0.1 - state.pinchDistance) / 0.07, 0), 1);
 
@@ -168,48 +193,43 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
 
     audio.updateArticulatory(articulatoryState);
 
-    // Display info
-    vowelName = articulatoryState.isVoiced ? "Voiced" : "Whisper";
+    // Display info with tilt debug
+    const tiltPercent = Math.round(state.tilt * 100);
+    vowelName = `${articulatoryState.isVoiced ? "Voiced" : "Whisper"} (Tilt: ${tiltPercent}%)`;
     // Don't override formants in articulatory mode, they're set internally
     return;
 
-  } else if (currentPreset === 'bio') {
+  } else if (currentMode === 'bio') {
     // --- Bio-Mechanical Mode ---
     // 1. Lip Closure (Pinch)
-    // Pinch < 0.05 = Closed (1). Open > 0.1 = Open (0).
     const closure = Math.min(Math.max((0.1 - state.pinchDistance) / 0.05, 0), 1);
 
-    // 2. Tongue Height (Hand Y)
-    // High Hand (Low Y) = High Tongue (High F1? No, High Tongue = Low F1 usually, like "Ee")
-    // Wait, "Ee" is High Tongue. "Ah" is Low Tongue.
-    // Let's map Hand Y (0=Top) to Tongue Height (1=High).
-    const tongueHeight = 1 - state.palmPosition.y;
+    // 2. Tongue Height & Backness - Use SAME metrics as Advanced mode for quality
+    // Use finger-based detection (Middle & Ring fingers) instead of wrist position
+    const tongueHeightRaw = state.tongueHeight;     // Middle finger extension
+    const tongueBackRaw = state.tongueBackness;     // Ring finger curl
 
-    // 3. Tongue Backness (Hand X)
-    // Left (1) = Back. Right (0) = Front.
-    const tongueBack = 1 - state.palmPosition.x;
+    // 3. Smooth values (same as Advanced mode)
+    const smoothFactor = 0.2;
+    lastX = lastX + (tongueBackRaw - lastX) * smoothFactor;
+    lastY = lastY + (tongueHeightRaw - lastY) * smoothFactor;
 
     // 4. Voicing (Roll)
-    // Roll > 0.5 = Flat (Voiced). Roll < 0.3 = Side (Unvoiced).
     const isVoiced = state.tilt > 0.4;
 
     // 5. Plosive Trigger
-    // Detect rapid opening: dClosure/dt < -threshold
-    // Simple state history
     if (!(window as any).lastClosure) (window as any).lastClosure = 0;
     const dClosure = closure - (window as any).lastClosure;
     (window as any).lastClosure = closure;
 
-    // If we were closed (>0.8) and now opening fast (dClosure < -threshold)
     const plosiveTrigger = (closure < 0.8 && (window as any).lastClosure > 0.8 && dClosure < -bioParams.plosiveSensitivity);
 
-    // Map Tongue to Formants (Vowel Space)
-    // We reuse VowelSpace but interpret X/Y as Back/Height
-    const formants = VowelSpace.getFormants(tongueBack, 1 - tongueHeight); // Invert Height for F1 mapping
+    // Map to Formants (using smoothed finger metrics)
+    const formants = VowelSpace.getFormants(lastX, 1 - lastY);
 
     audio.updateBio({
       lipClosure: closure,
-      tongueHeight: tongueHeight,
+      tongueHeight: lastY,  // Use smoothed value
       isVoiced: isVoiced,
       plosiveTrigger: plosiveTrigger,
       fricativeThreshold: bioParams.fricativeThreshold
@@ -273,29 +293,59 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
 }
 
 function drawVowelDebug(ctx: CanvasRenderingContext2D, x: number, y: number, label: string) {
-  // Draw a small crosshair indicating current vowel position
-  // Map x,y (0..1) to canvas dimensions
-  // Note: Canvas is mirrored in CSS, but drawing coordinates are normal.
-  // However, our X is "Backness". 
-  // If X=0 (Right/Front), X=1 (Left/Back).
-
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
 
-  const screenX = (1 - x) * w; // Invert X for visual match (if needed)
-  const screenY = (1 - y) * h; // Invert Y (0 is top, but 0 is Close/Low F1... wait)
-  // Y=0 (Close) -> Low F1. Y=1 (Open) -> High F1.
-  // Visually, usually High F1 is at the bottom of the chart.
-  // So Y=1 should be at bottom.
-
-  ctx.fillStyle = 'rgba(255, 255, 0, 0.5)';
+  // Draw Vowel Triangle (IPA vowel chart)
+  // Triangle corners: i (top-left), a (bottom-center), u (top-right)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(screenX, screenY, 10, 0, Math.PI * 2);
+
+  // Triangle vertices (approximate vowel space)
+  // i (Front High): x=0.2, y=0.2
+  // a (Central Low): x=0.5, y=0.8
+  // u (Back High): x=0.8, y=0.2
+  const iX = w * 0.2, iY = h * 0.2;
+  const aX = w * 0.5, aY = h * 0.8;
+  const uX = w * 0.8, uY = h * 0.2;
+
+  ctx.moveTo(iX, iY);
+  ctx.lineTo(aX, aY);
+  ctx.lineTo(uX, uY);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Label vowel corners
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.font = '16px Arial';
+  ctx.fillText('i (Ee)', iX - 30, iY - 10);
+  ctx.fillText('a (Ah)', aX - 15, aY + 25);
+  ctx.fillText('u (Oo)', uX + 10, uY - 10);
+
+  // Draw current position
+  const screenX = (1 - x) * w; // Invert X (backness)
+  const screenY = (1 - y) * h; // Invert Y (height)
+
+  ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
+  ctx.beginPath();
+  ctx.arc(screenX, screenY, 12, 0, Math.PI * 2);
   ctx.fill();
 
+  // Draw crosshair
+  ctx.strokeStyle = 'rgba(255, 255, 0, 0.6)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(screenX - 20, screenY);
+  ctx.lineTo(screenX + 20, screenY);
+  ctx.moveTo(screenX, screenY - 20);
+  ctx.lineTo(screenX, screenY + 20);
+  ctx.stroke();
+
+  // Label
   ctx.fillStyle = 'white';
-  ctx.font = '20px Arial';
-  ctx.fillText(label, screenX + 15, screenY);
+  ctx.font = 'bold 20px Arial';
+  ctx.fillText(label, screenX + 18, screenY);
 }
 
 async function init() {
