@@ -14,6 +14,15 @@ export interface HandState {
     // Monkey Mode Controls (Swapped for better ergonomics)
     breathAmount: number;      // 0-1 from vertical Y (low hand = 0, high hand = 1)
     pitchMultiplier: number;   // 0.5-2.0 from hand roll/rotation
+
+    // Finger States (for gesture recognition)
+    isPinch: boolean;
+    isThumbExt: boolean;
+    isIndexExt: boolean;
+    isMiddleExt: boolean;
+    isRingExt: boolean;
+    isPinkyExt: boolean;
+    thumbToFingerDistances: number[]; // [index, middle, ring, pinky]
 }
 
 export class HandAnalyzer {
@@ -38,21 +47,28 @@ export class HandAnalyzer {
         }
         HandAnalyzer.lastPinchDist = pinchDist;
 
-        const isPinching = pinchDist < 0.05;
-
         // 2. Openness (Average distance of fingertips to wrist)
         const wrist = landmarks[0];
-        const tips = [8, 12, 16, 20];
-        let totalDist = 0;
-        tips.forEach(i => {
-            totalDist += Math.sqrt(
-                Math.pow(landmarks[i].x - wrist.x, 2) +
-                Math.pow(landmarks[i].y - wrist.y, 2) +
-                Math.pow(landmarks[i].z - wrist.z, 2)
+
+        // Helper: Calculate distance between two 3D points
+        const dist = (p1: any, p2: any) => {
+            return Math.sqrt(
+                Math.pow(p1.x - p2.x, 2) +
+                Math.pow(p1.y - p2.y, 2) +
+                Math.pow(p1.z - p2.z, 2)
             );
-        });
-        const avgDist = totalDist / 4;
+        };
+
+        // Calculate average distance of fingertips to wrist (for openness)
+        const avgDist = (
+            dist(landmarks[8], wrist) +
+            dist(landmarks[12], wrist) +
+            dist(landmarks[16], wrist) +
+            dist(landmarks[20], wrist)
+        ) / 4;
         const openness = Math.min(Math.max((avgDist - 0.15) / 0.25, 0), 1);
+        // openness is calculated here but only used in return object
+        // We can inline it or keep it. Let's keep it for clarity but use it.
 
         // 3. Tilt / Orientation
         const handSize = Math.sqrt(
@@ -104,20 +120,45 @@ export class HandAnalyzer {
         // Map pitch range of -0.3 to +0.3 → multiplier 0.7 to 1.5
         const pitchMultiplier = 1.0 + (pitch * 1.3); // Centered at 1.0, range ~0.7-1.5
 
+        // Finger Extension Logic (simplified for now)
+        const isPinch = pinchDist < 0.05; // Re-using existing pinch logic
+        const isThumbExt = landmarks[4].y < landmarks[3].y; // Thumb tip higher than base
+        const isIndexExt = landmarks[8].y < landmarks[7].y; // Index tip higher than base
+        const isMiddleExt = landmarks[12].y < landmarks[11].y; // Middle tip higher than base
+        const isRingExt = landmarks[16].y < landmarks[15].y; // Ring tip higher than base
+        const isPinkyExt = landmarks[20].y < landmarks[19].y; // Pinky tip higher than base
+
+        const thumbToFingerDistances = [
+            Math.sqrt(Math.pow(landmarks[4].x - landmarks[8].x, 2) + Math.pow(landmarks[4].y - landmarks[8].y, 2) + Math.pow(landmarks[4].z - landmarks[8].z, 2)), // Thumb-Index
+            Math.sqrt(Math.pow(landmarks[4].x - landmarks[12].x, 2) + Math.pow(landmarks[4].y - landmarks[12].y, 2) + Math.pow(landmarks[4].z - landmarks[12].z, 2)), // Thumb-Middle
+            Math.sqrt(Math.pow(landmarks[4].x - landmarks[16].x, 2) + Math.pow(landmarks[4].y - landmarks[16].y, 2) + Math.pow(landmarks[4].z - landmarks[16].z, 2)), // Thumb-Ring
+            Math.sqrt(Math.pow(landmarks[4].x - landmarks[20].x, 2) + Math.pow(landmarks[4].y - landmarks[20].y, 2) + Math.pow(landmarks[4].z - landmarks[20].z, 2))  // Thumb-Pinky
+        ];
+
         return {
-            isPinching,
+            // Existing properties
+            isPinching: isPinch, // Legacy alias
             pinchDistance: pinchDist,
-            isOpen: openness > 0.8,
-            openness,
-            palmPosition: { x: wrist.x, y: wrist.y, z: wrist.z },
-            tilt: rollMetric,
-            pitch,
-            tongueHeight,
-            tongueBackness,
-            tongueTip,
-            pinchVelocity,
-            breathAmount,
-            pitchMultiplier
+            isOpen: !isPinch && isIndexExt && isMiddleExt && isRingExt && isPinkyExt,
+            openness: openness, // Use the calculated continuous value
+            palmPosition: landmarks[0], // Wrist
+            tilt: rollMetric, // Legacy
+            pitch: pitch, // Legacy
+            tongueHeight: tongueHeight, // Calculated below
+            tongueBackness: tongueBackness, // Calculated below
+            tongueTip: tongueTip, // Legacy
+            pinchVelocity: pinchVelocity, // Legacy
+            breathAmount: breathAmount, // Calculated in main.ts or below
+            pitchMultiplier: pitchMultiplier, // Calculated below
+
+            // New properties for extended gesture recognition
+            isPinch,
+            isThumbExt,
+            isIndexExt,
+            isMiddleExt,
+            isRingExt,
+            isPinkyExt,
+            thumbToFingerDistances
         };
     }
 }

@@ -5,6 +5,7 @@ import { HandAnalyzer } from './vision/HandAnalyzer';
 import { VowelSpace } from './audio/VowelSpace';
 import { ConsonantDetector } from './vision/ConsonantDetector';
 import type { ArticulatoryState } from './audio/ArticulatorSynth';
+import type { SuperAbstractState } from './audio/SuperAbstractSynth';
 
 const startBtn = document.getElementById('startBtn') as HTMLButtonElement;
 const statusEl = document.getElementById('status') as HTMLParagraphElement;
@@ -20,7 +21,7 @@ const latencyEl = document.getElementById('latency-display') as HTMLSpanElement;
 const audio = new AudioEngine();
 let tracker: HandTracker;
 
-let currentMode: 'simple' | 'advanced' | 'bio' | 'articulatory' | 'monkey' = 'advanced';
+let currentMode: 'simple' | 'advanced' | 'bio' | 'articulatory' | 'monkey' | 'super-abstract' = 'advanced';
 let currentSound: 'raw' | 'clean' | 'fm' = 'raw';
 let isPerfMode = false;
 
@@ -45,6 +46,8 @@ presetBtns.forEach(btn => {
       audio.setPreset('articulatory');
     } else if (preset === 'bio') {
       audio.setPreset('bio');
+    } else if (preset === 'super-abstract') {
+      audio.setPreset('super-abstract');
     }
 
     // Show/Hide mode-specific UI
@@ -65,6 +68,11 @@ presetBtns.forEach(btn => {
       } else {
         // Monkey mode has its own panel now, so hide hint for it too
         artHint.style.display = 'none';
+      }
+
+      if (preset === 'super-abstract') {
+        artHint.style.display = 'block';
+        artHint.innerText = "💡 TILT hand FORWARD to speak. THUMB touches fingers for consonants.";
       }
     }
   });
@@ -284,6 +292,46 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
     vowelName = `${VowelSpace.getNearestVowel(formants.f1, formants.f2)} (Breath: ${breathPercent}%)`;
 
     // Don't override formants, they're set in updateMonkey
+    vowelValEl.innerText = vowelName;
+    return;
+
+  } else if (currentMode === 'super-abstract') {
+    // --- Super Abstract Mode ---
+    // 1. Voice Control (Tilt Forward)
+    // Pitch metric: positive = back, negative = forward
+    // We want forward tilt to increase breath.
+    // Let's say neutral (0) to -0.4 is the range.
+    const tiltForward = Math.max(0, -state.pitch);
+    const breathAmount = Math.min(tiltForward / 0.4, 1.0);
+
+    // 2. Pitch (Roll)
+    // Same as Monkey Mode
+    const pitchMultiplier = state.pitchMultiplier;
+
+    // 3. Vowels (Finger Extension)
+    // Same as Advanced/Bio
+    const vowelHeight = state.tongueHeight;
+    const vowelBackness = state.tongueBackness;
+
+    const superState: SuperAbstractState = {
+      vowelHeight,
+      vowelBackness,
+      pitchMultiplier,
+      breathAmount,
+      thumbToIndex: state.thumbToFingerDistances[0],
+      thumbToMiddle: state.thumbToFingerDistances[1],
+      thumbToRing: state.thumbToFingerDistances[2],
+      thumbToPinky: state.thumbToFingerDistances[3]
+    };
+
+    audio.updateSuperAbstract(superState);
+
+    // UI Updates
+    const basePitch = 150;
+    pitchValEl.innerText = Math.round(basePitch * pitchMultiplier).toString();
+
+    const formants = VowelSpace.getFormants(vowelBackness, 1 - vowelHeight);
+    vowelName = `${VowelSpace.getNearestVowel(formants.f1, formants.f2)} (Breath: ${Math.round(breathAmount * 100)}%)`;
     vowelValEl.innerText = vowelName;
     return;
 

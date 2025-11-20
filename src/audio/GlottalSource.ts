@@ -49,10 +49,27 @@ export class GlottalSource {
     }
 
     private initVoicedSource() {
-        // For now, use triangle wave (smoother than sawtooth)
-        // TODO: Implement true Rosenberg pulse with PeriodicWave
+        // Rosenberg glottal pulse - more natural than triangle wave
+        // Creates smooth harmonic-rich waveform like human vocal cords
         this.voicedOsc = this.audioContext.createOscillator();
-        this.voicedOsc.type = 'triangle';
+
+        // Create Rosenberg-style glottal pulse using PeriodicWave
+        // This approximates the airflow through vocal cords
+        const numHarmonics = 64;
+        const real = new Float32Array(numHarmonics);
+        const imag = new Float32Array(numHarmonics);
+
+        // Rosenberg pulse has natural spectral rolloff (1/f²)
+        // This creates rich but smooth harmonics
+        for (let i = 1; i < numHarmonics; i++) {
+            const amplitude = 1 / (i * i); // Natural spectral envelope
+            const phase = Math.random() * Math.PI * 2; // Randomize phase for naturalness
+            real[i] = amplitude * Math.cos(phase);
+            imag[i] = amplitude * Math.sin(phase);
+        }
+
+        const wave = this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
+        this.voicedOsc.setPeriodicWave(wave);
         this.voicedOsc.frequency.value = 150;
 
         this.voicedOsc.connect(this.voicedGain);
@@ -133,10 +150,10 @@ export class GlottalSource {
         const voicedLevel = this.voicingAmount;
         this.voicedGain.gain.setTargetAtTime(voicedLevel, now, ramp);
 
-        // Noise component: full at voicing=0, reduced at voicing=1, plus breathiness
-        // Even fully voiced speech has some breathiness
-        const baseNoise = (1 - this.voicingAmount);
-        const totalNoise = baseNoise + (this.breathiness * 0.3); // Breathiness adds max 30%
+        // Noise component: MUCH less aggressive
+        // Use cubic curve to make noise drop off very quickly
+        const baseNoise = Math.pow(1 - this.voicingAmount, 3.0); // Cubic falloff
+        const totalNoise = baseNoise + (this.breathiness * 0.1); // Breathiness adds only 10% max
         this.noiseGain.gain.setTargetAtTime(totalNoise, now, ramp);
     }
 

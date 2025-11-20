@@ -18,9 +18,10 @@
         <span>Mode:</span>
         <button class="preset-btn" data-preset="simple">Simple (Open/Close)</button>
         <button class="preset-btn active" data-preset="advanced">Advanced (2D Vowels)</button>
-        <button class="preset-btn" data-preset="bio">Bio (Speech Physics)</button>
-        <button class="preset-btn" data-preset="articulatory">Articulatory (Breath)</button>
-        <button class="preset-btn" data-preset="monkey">🐵 Monkey (Speech AI)</button>
+        <button class="preset-btn" data-preset="bio">Bio-Mechanical</button>
+        <button class="preset-btn" data-preset="articulatory">Articulatory</button>
+        <button class="preset-btn" data-preset="monkey">Monkey</button>
+        <button class="preset-btn" data-preset="super-abstract">Super Abstract</button>
       </div>
 
       <div class="sound-group">
@@ -57,32 +58,58 @@
               raised for breath!):</p>
 
             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 0.75rem;">
+              <!-- Column 1: Front -->
               <div>
-                <strong style="font-size: 0.85rem;">Bilabial</strong>
+                <strong style="font-size: 0.85rem;">Lips/Teeth</strong>
                 <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
-                  <button class="ipa-btn" data-ipa="m" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[m]</button>
-                  <button class="ipa-btn" data-ipa="b" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[b]</button>
-                  <button class="ipa-btn" data-ipa="p" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[p]</button>
+                  <button class="ipa-btn" data-ipa="m" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">m</button>
+                  <button class="ipa-btn" data-ipa="b" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">b</button>
+                  <button class="ipa-btn" data-ipa="p" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">p</button>
+                </div>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
+                  <button class="ipa-btn" data-ipa="f" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">f</button>
+                  <button class="ipa-btn" data-ipa="v" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">v</button>
+                </div>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
+                  <button class="ipa-btn" data-ipa="th" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">θ</button>
+                  <button class="ipa-btn" data-ipa="dh" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">ð</button>
                 </div>
               </div>
 
+              <!-- Column 2: Middle -->
               <div>
-                <strong style="font-size: 0.85rem;">Alveolar</strong>
+                <strong style="font-size: 0.85rem;">Alveolar/Post</strong>
                 <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
-                  <button class="ipa-btn" data-ipa="n" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[n]</button>
-                  <button class="ipa-btn" data-ipa="t" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[t]</button>
-                  <button class="ipa-btn" data-ipa="d" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[d]</button>
+                  <button class="ipa-btn" data-ipa="n" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">n</button>
+                  <button class="ipa-btn" data-ipa="t" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">t</button>
+                  <button class="ipa-btn" data-ipa="d" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">d</button>
                 </div>
                 <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
-                  <button class="ipa-btn" data-ipa="s" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[s]</button>
+                  <button class="ipa-btn" data-ipa="s" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">s</button>
+                  <button class="ipa-btn" data-ipa="z" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">z</button>
+                </div>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
+                  <button class="ipa-btn" data-ipa="sh" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">ʃ</button>
+                  <button class="ipa-btn" data-ipa="zh" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">ʒ</button>
                 </div>
               </div>
 
+              <!-- Column 3: Back/Approx -->
               <div>
-                <strong style="font-size: 0.85rem;">Velar/Glottal</strong>
+                <strong style="font-size: 0.85rem;">Velar/Approx</strong>
                 <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
-                  <button class="ipa-btn" data-ipa="k" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[k]</button>
-                  <button class="ipa-btn" data-ipa="h" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[h]</button>
+                  <button class="ipa-btn" data-ipa="k" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">k</button>
+                  <button class="ipa-btn" data-ipa="g" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">g</button>
+                  <button class="ipa-btn" data-ipa="ng" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">ŋ</button>
+                </div>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
+                  <button class="ipa-btn" data-ipa="h" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">h</button>
+                  <button class="ipa-btn" data-ipa="w" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">w</button>
+                  <button class="ipa-btn" data-ipa="j" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">j</button>
+                </div>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
+                  <button class="ipa-btn" data-ipa="l" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">l</button>
+                  <button class="ipa-btn" data-ipa="r" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">r</button>
                 </div>
               </div>
             </div>

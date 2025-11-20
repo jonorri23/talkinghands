@@ -1,7 +1,7 @@
 import type { HandState } from './HandAnalyzer';
 
 export interface ConsonantGesture {
-    type: 'bilabial' | 'alveolar' | 'velar' | 'glottal' | 'none';
+    type: 'bilabial' | 'labiodental' | 'dental' | 'alveolar' | 'postalveolar' | 'velar' | 'glottal' | 'none';
     closure: number;        // 0-1 degree of constriction
     isComplete: boolean;    // Full closure for plosives
     manner: 'stop' | 'fricative' | 'nasal' | 'approximant' | 'none';
@@ -11,66 +11,116 @@ export interface ConsonantGesture {
 export class ConsonantDetector {
 
     static detect(state: HandState): ConsonantGesture {
-        // Strategy 1: Hybrid Spatial+Poses
+        const {
+            isPinch, pinchDistance,
+            isThumbExt, isIndexExt, isMiddleExt, isRingExt, isPinkyExt,
+            thumbToFingerDistances
+        } = state;
 
-        // 1. Bilabial (Lips) -> Pinch
-        // Thumb touching Index
-        if (state.pinchDistance < 0.05) {
-            // Map distance 0.05->0.0 to closure 0.0->1.0
-            const closure = Math.min(Math.max((0.05 - state.pinchDistance) / 0.04, 0), 1);
-
-            return {
-                type: 'bilabial',
-                closure: closure,
-                isComplete: closure > 0.9,
-                manner: 'stop' // Default to stop/nasal for pinch
-            };
-        }
-
-        // 2. Alveolar (Teeth) -> Pointing (Index + Middle extended)
-        // We use tongueHeight (Middle finger) as a proxy for "pointing" intent
-        // If Middle is extended (High tongueHeight) AND we are NOT pinching
-        if (state.tongueHeight > 0.8 && !state.isPinching) {
-            // Check if it's a fricative gesture (maybe slightly different?)
-            // For now, let's map extension to closure/proximity
-            const closure = (state.tongueHeight - 0.8) / 0.2;
-
-            return {
-                type: 'alveolar',
-                closure: closure,
-                isComplete: false, // Pointing usually doesn't fully close unless we define a "touch"
-                manner: 'fricative' // Pointing = [s], [t] (if burst)
-            };
-        }
-
-        // 3. Velar (Back) -> Pinky Extension
-        // tongueTip is Pinky extension
-        if (state.tongueTip > 0.8) {
-            const closure = (state.tongueTip - 0.8) / 0.2;
-            return {
-                type: 'velar',
-                closure: closure,
-                isComplete: false,
-                manner: 'stop' // [k], [g]
-            };
-        }
-
-        // 4. Glottal (Open) -> Flat hand / Open
-        // If openness is high
-        if (state.openness > 0.8) {
-            return {
-                type: 'glottal',
-                closure: 0,
-                isComplete: false,
-                manner: 'fricative' // [h]
-            };
-        }
-
-        return {
+        // Default: No consonant
+        const gesture: ConsonantGesture = {
             type: 'none',
             closure: 0,
             isComplete: false,
             manner: 'none'
         };
+
+        // 1. Bilabial (Pinch: Thumb + Index) -> [m, b, p]
+        if (isPinch) {
+            gesture.type = 'bilabial';
+            gesture.closure = Math.max(0, 1 - (pinchDistance / 0.05)); // 0.05m threshold
+            gesture.isComplete = gesture.closure > 0.8;
+            gesture.manner = 'stop'; // Default to stop/nasal
+            return gesture;
+        }
+
+        // 2. Labiodental (Thumb + Middle touch) -> [f, v]
+        const thumbToMiddle = thumbToFingerDistances[1]; // Index 1 is Middle
+        if (thumbToMiddle < 0.05) {
+            gesture.type = 'labiodental';
+            gesture.closure = Math.max(0, 1 - (thumbToMiddle / 0.05));
+            gesture.isComplete = gesture.closure > 0.8;
+            gesture.manner = 'fricative';
+            return gesture;
+        }
+
+        // 3. Dental (Thumb + Ring touch) -> [th, dh]
+        const thumbToRing = thumbToFingerDistances[2]; // Index 2 is Ring
+        if (thumbToRing < 0.05) {
+            gesture.type = 'dental';
+            gesture.closure = Math.max(0, 1 - (thumbToRing / 0.05));
+            gesture.isComplete = gesture.closure > 0.8;
+            gesture.manner = 'fricative';
+            return gesture;
+        }
+
+        // 4. Lateral Approximant (L-Shape: Thumb + Index extended) -> [l]
+        // Must NOT be a pinch (handled above)
+        if (isThumbExt && isIndexExt && !isMiddleExt && !isRingExt && !isPinkyExt) {
+            gesture.type = 'alveolar'; // [l] is alveolar
+            gesture.closure = 0.8; // Partial closure
+            gesture.isComplete = false;
+            gesture.manner = 'approximant';
+            gesture.phoneme = 'l'; // Explicitly identify
+            return gesture;
+        }
+
+        // 5. Postalveolar (Peace Sign: Index + Middle extended) -> [sh, zh]
+        if (isIndexExt && isMiddleExt && !isRingExt && !isPinkyExt && !isThumbExt) {
+            gesture.type = 'postalveolar';
+            gesture.closure = 0.7; // Fricative constriction
+            gesture.isComplete = false;
+            gesture.manner = 'fricative';
+            return gesture;
+        }
+
+        // 6. Labio-velar Glide (Shaka: Thumb + Pinky extended) -> [w]
+        if (isThumbExt && isPinkyExt && !isIndexExt && !isMiddleExt && !isRingExt) {
+            gesture.type = 'velar'; // [w] is labio-velar
+            gesture.closure = 0.5; // Approximant
+            gesture.isComplete = false;
+            gesture.manner = 'approximant';
+            gesture.phoneme = 'w';
+            return gesture;
+        }
+
+        // 7. Rhotic Approximant (Rock On: Index + Pinky extended) -> [r]
+        if (isIndexExt && isPinkyExt && !isMiddleExt && !isRingExt && !isThumbExt) {
+            gesture.type = 'alveolar'; // [r] is alveolar/postalveolar
+            gesture.closure = 0.6;
+            gesture.isComplete = false;
+            gesture.manner = 'approximant';
+            gesture.phoneme = 'r';
+            return gesture;
+        }
+
+        // 8. Alveolar (Point: Index only) -> [s, t, d, n]
+        if (isIndexExt && !isMiddleExt && !isRingExt && !isPinkyExt && !isThumbExt) {
+            gesture.type = 'alveolar';
+            gesture.closure = 0.9; // High constriction
+            gesture.isComplete = false;
+            gesture.manner = 'fricative'; // Default to [s]
+            return gesture;
+        }
+
+        // 9. Velar (Pinky only) -> [k, g, ng]
+        if (isPinkyExt && !isIndexExt && !isMiddleExt && !isRingExt && !isThumbExt) {
+            gesture.type = 'velar';
+            gesture.closure = 1.0; // Full closure
+            gesture.isComplete = true;
+            gesture.manner = 'stop';
+            return gesture;
+        }
+
+        // 10. Glottal (Open Hand) -> [h]
+        if (isIndexExt && isMiddleExt && isRingExt && isPinkyExt) {
+            gesture.type = 'glottal';
+            gesture.closure = 0.4;
+            gesture.isComplete = false;
+            gesture.manner = 'fricative';
+            return gesture;
+        }
+
+        return gesture;
     }
 }

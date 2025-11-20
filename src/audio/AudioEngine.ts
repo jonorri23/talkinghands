@@ -3,8 +3,9 @@ import { ArticulatorSynth, type ArticulatoryState } from './ArticulatorSynth';
 import { GlottalSource } from './GlottalSource';
 import type { ConsonantGesture } from '../vision/ConsonantDetector';
 import { CONSONANTS } from './IPAConsonants';
+import { SuperAbstractSynth, type SuperAbstractState } from './SuperAbstractSynth';
 
-export type PresetName = 'raw' | 'clean' | 'fm' | 'bio' | 'articulatory' | 'monkey';
+export type PresetName = 'raw' | 'clean' | 'fm' | 'bio' | 'articulatory' | 'monkey' | 'super-abstract';
 
 // Monkey Mode State
 export interface MonkeyState {
@@ -45,6 +46,9 @@ export class AudioEngine {
     // Monkey Mode
     private glottalSource: GlottalSource | null = null;
     private voiceSizeMultiplier: number = 1.0; // For voice character scaling
+
+    // SuperAbstract Mode
+    private superAbstractSynth: SuperAbstractSynth | null = null;
 
     private currentPreset: PresetName = 'raw';
 
@@ -129,6 +133,9 @@ export class AudioEngine {
         // --- Monkey Mode Components ---
         this.glottalSource = new GlottalSource(this.audioContext);
 
+        // --- SuperAbstract Mode ---
+        this.superAbstractSynth = new SuperAbstractSynth(this.audioContext);
+
         // Initialize Noise
         this.initNoise();
 
@@ -183,6 +190,11 @@ export class AudioEngine {
         // Disconnect Monkey Mode source
         if (this.glottalSource) {
             try { this.glottalSource.output.disconnect(); } catch (e) { }
+        }
+
+        // Disconnect SuperAbstract
+        if (this.superAbstractSynth) {
+            try { this.superAbstractSynth.disconnect(); } catch (e) { }
         }
 
         // 2. Create new source
@@ -243,6 +255,21 @@ export class AudioEngine {
 
             // Master gain controlled by breath amount
             this.masterGain!.gain.setValueAtTime(0.0, now);
+
+            // Master gain controlled by breath amount
+            this.masterGain!.gain.setValueAtTime(0.0, now);
+
+        } else if (name === 'super-abstract') {
+            // --- SuperAbstract Mode ---
+            if (this.superAbstractSynth) {
+                this.superAbstractSynth.connect(this.masterGain!);
+            }
+            // Master gain controlled by synth internally (via output level)
+            // But we set it to 1.0 here to allow signal through
+            this.masterGain!.gain.setValueAtTime(1.0, now);
+
+            // Open LPF
+            this.globalLpf!.frequency.setValueAtTime(20000, now);
 
         } else if (name === 'bio') {
             // Bio Mode (Legacy)
@@ -327,9 +354,17 @@ export class AudioEngine {
     setFormants(f1Freq: number, f2Freq: number, f3Freq: number) {
         if (this.filterChain.length < 3 || !this.audioContext) return;
         const now = this.audioContext.currentTime;
+
+        // Set formant frequencies
         this.filterChain[0].frequency.linearRampToValueAtTime(f1Freq, now + 0.05);
         this.filterChain[1].frequency.linearRampToValueAtTime(f2Freq, now + 0.05);
         this.filterChain[2].frequency.linearRampToValueAtTime(f3Freq, now + 0.05);
+
+        // Natural formant bandwidths for human voice
+        // Lower formants are narrower, higher formants are broader
+        this.filterChain[0].Q.setValueAtTime(15, now); // F1: narrow resonance
+        this.filterChain[1].Q.setValueAtTime(12, now); // F2: medium
+        this.filterChain[2].Q.setValueAtTime(8, now);  // F3: broader
     }
 
     triggerEnergy(velocity: number = 1.0) {
@@ -438,25 +473,26 @@ export class AudioEngine {
         if (this.currentPreset !== 'monkey' || !this.audioContext || !this.glottalSource) return;
 
         const now = this.audioContext.currentTime;
-        const ramp = 0.01; // Low latency response
+        const ramp = 0.03; // Smoother for singing (was 0.01)
 
         // --- 1. Base Voice (Vowels) ---
 
         // Breath -> Voicing Amount
-        // FIX: Make voicing come in sooner (power < 1 shifts curve left)
-        const voicingAmount = Math.pow(state.breathAmount, 0.7);
+        // Smoother curve for more gradual voicing onset
+        const voicingAmount = Math.pow(state.breathAmount, 0.6); // Slightly softer than 0.7
         this.glottalSource.setVoicingAmount(voicingAmount);
 
         // Breath -> Output Level (amplitude)
-        const outputLevel = Math.pow(state.breathAmount, 1.5);
+        const outputLevel = Math.pow(state.breathAmount, 1.3); // Gentler curve for singing
         this.glottalSource.setOutputLevel(outputLevel);
 
         // Master gain also scales with breath
         this.masterGain!.gain.setTargetAtTime(outputLevel, now, ramp);
 
         // Amplitude-dependent breathiness
-        // FIX: Reduce breathiness more aggressively
-        const breathiness = Math.pow(Math.max(0, 1 - state.breathAmount * 1.5), 2.0);
+        // DRASTICALLY reduced - only noticeable at very low breath
+        // This allows clean singing at higher amplitudes
+        const breathiness = Math.pow(Math.max(0, 1 - state.breathAmount * 2.5), 4.0);
         this.glottalSource.setBreathiness(breathiness);
 
         // Pitch from pitchMultiplier
@@ -469,9 +505,9 @@ export class AudioEngine {
         const f2Base = 800 + (state.vowelBackness * 1600);
         const f3Base = 2200 + (state.vowelBackness * 500);
 
-        const f1 = f1Base * this.voiceSizeMultiplier;
-        const f2 = f2Base * this.voiceSizeMultiplier;
-        const f3 = f3Base * this.voiceSizeMultiplier;
+        let f1 = f1Base * this.voiceSizeMultiplier;
+        let f2 = f2Base * this.voiceSizeMultiplier;
+        let f3 = f3Base * this.voiceSizeMultiplier;
 
         this.setFormants(f1, f2, f3);
 
@@ -489,22 +525,27 @@ export class AudioEngine {
             if (!phoneme) {
                 // Map gesture to IPA phoneme (for hand gestures)
                 if (gesture.type === 'bilabial') {
-                    // Pinch -> [m] (nasal) or [b]/[p] (stop)
-                    // For now, let's make pinch = [m] if voiced, [p] if whisper?
-                    // Or just [m] for continuous pinch, and [b]/[p] on release (burst)
-                    // Let's start with [m] for continuous pinch
-                    phoneme = 'm';
+                    phoneme = 'm'; // Default to [m]
+                } else if (gesture.type === 'labiodental') {
+                    phoneme = 'f'; // Default to [f]
+                } else if (gesture.type === 'dental') {
+                    phoneme = 'th'; // Default to [θ]
                 } else if (gesture.type === 'alveolar') {
-                    // Pointing -> [n] or [s] or [t]/[d]
-                    // Let's map continuous pointing to [s] (fricative)
-                    phoneme = 's';
+                    // Check if it's an approximant gesture (L or R)
+                    if (gesture.phoneme) {
+                        phoneme = gesture.phoneme; // [l] or [r]
+                    } else {
+                        phoneme = 's'; // Default to [s]
+                    }
+                } else if (gesture.type === 'postalveolar') {
+                    phoneme = 'sh'; // Default to [ʃ]
                 } else if (gesture.type === 'velar') {
-                    // Pinky -> [k] (stop)
-                    // Stops are hard to sustain. Maybe [ng]?
-                    // For now, let's try to make it a sustained closure for [k] preparation
-                    phoneme = 'k';
+                    if (gesture.phoneme) {
+                        phoneme = gesture.phoneme; // [w]
+                    } else {
+                        phoneme = 'k'; // Default to [k]
+                    }
                 } else if (gesture.type === 'glottal') {
-                    // Open -> [h]
                     phoneme = 'h';
                 }
             }
@@ -513,39 +554,73 @@ export class AudioEngine {
                 const params = CONSONANTS[phoneme];
                 const closure = gesture.closure; // 0-1 intensity of gesture
 
-                // Apply consonant parameters blended by closure amount
+                // --- Approximant Formant Blending ---
+                // If this consonant has specific formant targets (l, r, w, j),
+                // blend current vowel formants towards them based on closure.
+                if (params.targetFormants) {
+                    const blend = closure; // 0=Vowel, 1=Consonant
+                    f1 = f1 * (1 - blend) + (params.targetFormants.f1 * this.voiceSizeMultiplier * blend);
+                    f2 = f2 * (1 - blend) + (params.targetFormants.f2 * this.voiceSizeMultiplier * blend);
+                    f3 = f3 * (1 - blend) + (params.targetFormants.f3 * this.voiceSizeMultiplier * blend);
 
-                // Oral Gain: Close mouth for stops/nasals
-                // If params.oralGain is 0, we want to go to 0 as closure -> 1
-                targetOralGain = 1.0 - (closure * (1.0 - params.oralGain));
+                    // Re-apply formants with blended values
+                    this.setFormants(f1, f2, f3);
+                }
+
+                // Apply consonant parameters with IMPROVED COARTICULATION
+
+                // Oral Gain: Reduce but don't completely mute for smoother transitions
+                // Stops reduce to 0.2 instead of 0.0 to maintain some vowel quality
+                const minOralGain = Math.max(params.oralGain, 0.2); // Never go below 0.2
+                targetOralGain = 1.0 - (closure * (1.0 - minOralGain));
 
                 // Nasal Gain: Open nose for nasals
                 targetNasalGain = closure * params.nasalGain;
 
                 // Fricative Gain: Noise for fricatives
-                targetFricativeGain = closure * (params.manner === 'fricative' ? 1.0 : 0.0);
+                if (params.manner === 'fricative') {
+                    // Turbulent noise for [s], [h], etc
+                    targetFricativeGain = closure * 0.8; // Increased from previous
+                } else {
+                    targetFricativeGain = 0.0;
+                }
 
                 // Filter settings for fricatives
-                if (params.manner === 'fricative' || params.manner === 'stop') {
+                if (params.manner === 'fricative') {
                     if (this.fricativeFilter) {
-                        // Update filter freq
                         this.fricativeFilter.type = 'bandpass';
                         this.fricativeFilter.frequency.setTargetAtTime(params.noiseFreq, now, ramp);
                         this.fricativeFilter.Q.setTargetAtTime(params.noiseBandwidth, now, ramp);
                     }
                 }
 
-                // Special case: [s] needs high gain on noise
-                if (phoneme === 's') {
-                    targetFricativeGain *= 0.5; // Adjust level
+                // Formant damping for consonants (reduces resonance during articulation)
+                // This makes consonants sound less "vowel-y"
+                if (params.formantDamping > 0 && this.filterChain.length >= 3) {
+                    const dampFactor = 1 - (closure * params.formantDamping * 0.5); // Moderate damping
+                    this.filterChain[0].Q.setTargetAtTime(15 * dampFactor, now, ramp);
+                    this.filterChain[1].Q.setTargetAtTime(12 * dampFactor, now, ramp);
+                    this.filterChain[2].Q.setTargetAtTime(8 * dampFactor, now, ramp);
                 }
             }
         }
 
-        // Apply Gains
-        if (this.oralGain) this.oralGain.gain.setTargetAtTime(targetOralGain, now, ramp);
-        if (this.nasalGain) this.nasalGain.gain.setTargetAtTime(targetNasalGain, now, ramp);
-        if (this.fricativeGain) this.fricativeGain.gain.setTargetAtTime(targetFricativeGain, now, ramp);
+        // Apply gains smoothly
+        if (this.oralGain) {
+            this.oralGain.gain.setTargetAtTime(targetOralGain, now, ramp * 2); // Slower for smoothness
+        }
+        if (this.nasalGain) {
+            this.nasalGain.gain.setTargetAtTime(targetNasalGain, now, ramp);
+        }
+        if (this.fricativeGain) {
+            this.fricativeGain.gain.setTargetAtTime(targetFricativeGain, now, ramp);
+        }
+    }
+
+    // --- SuperAbstract Update ---
+    updateSuperAbstract(state: SuperAbstractState) {
+        if (this.currentPreset !== 'super-abstract' || !this.superAbstractSynth) return;
+        this.superAbstractSynth.update(state);
     }
 
     // Voice Size Control (for UI slider)
