@@ -67,7 +67,34 @@ perfToggle.addEventListener('change', (e) => {
   }
 });
 
-// Spacebar removed - using Tilt for breath control
+
+// Bio Mode Parameters (tunable via UI)
+let bioParams = {
+  fricativeThreshold: 0.8,
+  plosiveSensitivity: 0.05
+};
+
+// Bind Bio Tweak Sliders
+const fricThreshSlider = document.getElementById('fric-thresh') as HTMLInputElement;
+const plosiveSensSlider = document.getElementById('plosive-sens') as HTMLInputElement;
+const fricThreshVal = document.getElementById('fric-thresh-val') as HTMLSpanElement;
+const plosiveSensVal = document.getElementById('plosive-sens-val') as HTMLSpanElement;
+
+if (fricThreshSlider && fricThreshVal) {
+  fricThreshSlider.addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    bioParams.fricativeThreshold = val;
+    fricThreshVal.innerText = val.toFixed(2);
+  });
+}
+
+if (plosiveSensSlider && plosiveSensVal) {
+  plosiveSensSlider.addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    bioParams.plosiveSensitivity = val;
+    plosiveSensVal.innerText = val.toFixed(2);
+  });
+}
 
 // State for smoothing
 let lastX = 0.5;
@@ -173,8 +200,8 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
     const dClosure = closure - (window as any).lastClosure;
     (window as any).lastClosure = closure;
 
-    // If we were closed (>0.8) and now opening fast (dClosure < -0.1)
-    const plosiveTrigger = (closure < 0.8 && (window as any).lastClosure > 0.8 && dClosure < -0.05);
+    // If we were closed (>0.8) and now opening fast (dClosure < -threshold)
+    const plosiveTrigger = (closure < 0.8 && (window as any).lastClosure > 0.8 && dClosure < -bioParams.plosiveSensitivity);
 
     // Map Tongue to Formants (Vowel Space)
     // We reuse VowelSpace but interpret X/Y as Back/Height
@@ -184,7 +211,8 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
       lipClosure: closure,
       tongueHeight: tongueHeight,
       isVoiced: isVoiced,
-      plosiveTrigger: plosiveTrigger
+      plosiveTrigger: plosiveTrigger,
+      fricativeThreshold: bioParams.fricativeThreshold
     });
 
     f1 = formants.f1;

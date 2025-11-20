@@ -300,6 +300,7 @@ export class AudioEngine {
         tongueHeight: number; // 0 (Low) to 1 (High/Roof)
         isVoiced: boolean;
         plosiveTrigger: boolean;
+        fricativeThreshold: number; // Tunable threshold for fricative detection
     }) {
         if (this.currentPreset !== 'bio' || !this.audioContext) return;
         const now = this.audioContext.currentTime;
@@ -312,17 +313,17 @@ export class AudioEngine {
         if (this.oralGain) this.oralGain.gain.setTargetAtTime(oralLevel, now, ramp);
         if (this.nasalGain) this.nasalGain.gain.setTargetAtTime(nasalLevel * 0.5, now, ramp);
 
-        // 2. Fricatives (Tongue Height)
+        // 2. Fricatives (Tongue Height) - now with tunable threshold
         let fricativeVol = 0;
-        if (params.tongueHeight > 0.8) {
-            fricativeVol = (params.tongueHeight - 0.8) / 0.2; // 0 to 1
+        if (params.tongueHeight > params.fricativeThreshold) {
+            fricativeVol = (params.tongueHeight - params.fricativeThreshold) / (1 - params.fricativeThreshold);
         }
-        // Unvoiced sounds (Palm Side) should boost fricatives?
+        // Unvoiced sounds (Palm Side) should boost fricatives
         if (!params.isVoiced) fricativeVol *= 2;
 
         if (this.fricativeGain) this.fricativeGain.gain.setTargetAtTime(fricativeVol, now, ramp);
 
-        // 3. Plosives (Burst)
+        // 3. Plosives (Burst) - sensitivity controlled by main.ts
         if (params.plosiveTrigger) {
             this.masterGain!.gain.cancelScheduledValues(now);
             this.masterGain!.gain.setValueAtTime(1.0, now);
