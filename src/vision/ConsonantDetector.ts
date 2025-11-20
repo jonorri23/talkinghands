@@ -5,6 +5,7 @@ export interface ConsonantGesture {
     closure: number;        // 0-1 degree of constriction
     isComplete: boolean;    // Full closure for plosives
     manner: 'stop' | 'fricative' | 'nasal' | 'approximant' | 'none';
+    phoneme?: string;       // Optional: specific IPA phoneme (for manual testing)
 }
 
 export class ConsonantDetector {

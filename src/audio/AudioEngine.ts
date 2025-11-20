@@ -483,28 +483,30 @@ export class AudioEngine {
         if (state.consonant && state.consonant.type !== 'none') {
             const gesture = state.consonant;
 
-            // Map gesture to IPA phoneme
-            // This is a simplified mapping for Phase 1
-            let phoneme = '';
+            // Use explicit phoneme if provided (from IPA buttons), otherwise map from gesture
+            let phoneme = gesture.phoneme || '';
 
-            if (gesture.type === 'bilabial') {
-                // Pinch -> [m] (nasal) or [b]/[p] (stop)
-                // For now, let's make pinch = [m] if voiced, [p] if whisper?
-                // Or just [m] for continuous pinch, and [b]/[p] on release (burst)
-                // Let's start with [m] for continuous pinch
-                phoneme = 'm';
-            } else if (gesture.type === 'alveolar') {
-                // Pointing -> [n] or [s] or [t]/[d]
-                // Let's map continuous pointing to [s] (fricative)
-                phoneme = 's';
-            } else if (gesture.type === 'velar') {
-                // Pinky -> [k] (stop)
-                // Stops are hard to sustain. Maybe [ng]?
-                // For now, let's try to make it a sustained closure for [k] preparation
-                phoneme = 'k';
-            } else if (gesture.type === 'glottal') {
-                // Open -> [h]
-                phoneme = 'h';
+            if (!phoneme) {
+                // Map gesture to IPA phoneme (for hand gestures)
+                if (gesture.type === 'bilabial') {
+                    // Pinch -> [m] (nasal) or [b]/[p] (stop)
+                    // For now, let's make pinch = [m] if voiced, [p] if whisper?
+                    // Or just [m] for continuous pinch, and [b]/[p] on release (burst)
+                    // Let's start with [m] for continuous pinch
+                    phoneme = 'm';
+                } else if (gesture.type === 'alveolar') {
+                    // Pointing -> [n] or [s] or [t]/[d]
+                    // Let's map continuous pointing to [s] (fricative)
+                    phoneme = 's';
+                } else if (gesture.type === 'velar') {
+                    // Pinky -> [k] (stop)
+                    // Stops are hard to sustain. Maybe [ng]?
+                    // For now, let's try to make it a sustained closure for [k] preparation
+                    phoneme = 'k';
+                } else if (gesture.type === 'glottal') {
+                    // Open -> [h]
+                    phoneme = 'h';
+                }
             }
 
             if (phoneme && CONSONANTS[phoneme]) {

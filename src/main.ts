@@ -84,6 +84,52 @@ if (voiceSizeSlider) {
   });
 }
 
+const fastModeCheckbox = document.getElementById('fast-mode') as HTMLInputElement;
+if (fastModeCheckbox) {
+  fastModeCheckbox.addEventListener('change', (e) => {
+    const enabled = (e.target as HTMLInputElement).checked;
+    if (tracker) {
+      tracker.setFastMode(enabled);
+    }
+  });
+}
+
+// IPA Test Buttons
+const ipaBtns = document.querySelectorAll('.ipa-btn');
+let activeConsonant: string | null = null;
+
+ipaBtns.forEach(btn => {
+  const startConsonant = (ipa: string) => {
+    activeConsonant = ipa;
+    (btn as HTMLElement).style.background = '#00ff0040';
+  };
+
+  const stopConsonant = () => {
+    activeConsonant = null;
+    (btn as HTMLElement).style.background = '';
+  };
+
+  btn.addEventListener('mousedown', (e) => {
+    const ipa = (e.target as HTMLElement).dataset.ipa!;
+    startConsonant(ipa);
+  });
+
+  btn.addEventListener('mouseup', stopConsonant);
+  btn.addEventListener('mouseleave', stopConsonant);
+
+  // Touch support
+  btn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const ipa = (e.target as HTMLElement).dataset.ipa!;
+    startConsonant(ipa);
+  });
+
+  btn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    stopConsonant();
+  });
+});
+
 // UI Event Listeners - Sound (Waveform) Buttons
 soundBtns.forEach(btn => {
   btn.addEventListener('click', (e) => {
@@ -105,8 +151,9 @@ soundBtns.forEach(btn => {
 perfToggle.addEventListener('change', (e) => {
   isPerfMode = (e.target as HTMLInputElement).checked;
   if (isPerfMode) {
+    // Hide video feed but KEEP canvas (hand skeleton) visible
     videoEl.style.opacity = '0';
-    canvasEl.style.opacity = '0';
+    canvasEl.style.opacity = '1';  // Keep skeleton visible!
   } else {
     videoEl.style.opacity = '1';
     canvasEl.style.opacity = '1';
@@ -192,12 +239,35 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
     // - Hand rotation (roll) = Pitch
     // - Hand X/Y spatial position = Vowel quality
 
+    // Detect consonant from hand OR manual button
+    let consonantGesture = ConsonantDetector.detect(state);
+
+    // Override with manual IPA button if pressed
+    if (activeConsonant) {
+      // Create a fake gesture based on the IPA button
+      const ipaToPlace: Record<string, 'bilabial' | 'alveolar' | 'velar' | 'glottal'> = {
+        'm': 'bilabial', 'b': 'bilabial', 'p': 'bilabial',
+        'n': 'alveolar', 't': 'alveolar', 'd': 'alveolar', 's': 'alveolar',
+        'k': 'velar',
+        'h': 'glottal'
+      };
+
+      consonantGesture = {
+        type: ipaToPlace[activeConsonant] || 'none',
+        closure: 1.0, // Full intensity for manual testing
+        isComplete: true,
+        manner: ['m', 'n'].includes(activeConsonant) ? 'nasal' :
+          ['s', 'h'].includes(activeConsonant) ? 'fricative' : 'stop',
+        phoneme: activeConsonant // Pass the exact IPA phoneme
+      };
+    }
+
     const monkeyState: MonkeyState = {
       breathAmount: state.breathAmount,         // From vertical Y (raise hand to speak)
       pitchMultiplier: state.pitchMultiplier,   // From hand roll (twist for pitch)
       vowelBackness: state.tongueBackness,      // Ring finger extension (0=front, 1=back)
       vowelHeight: state.tongueHeight,          // Middle finger extension (0=low, 1=high)
-      consonant: ConsonantDetector.detect(state) // Phase 2: Consonant detection
+      consonant: consonantGesture               // Phase 2: Consonant detection or manual
     };
 
 

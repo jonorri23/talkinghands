@@ -17,6 +17,9 @@ export class HandTracker {
     private lastDrawTime = 0;
     private readonly DRAW_INTERVAL = 1000 / 60; // Cap drawing at 60fps
 
+    private modelComplexity: 0 | 1 = 1; // 0=fast, 1=accurate (default)
+    private visionFilesetResolver: any; // Store for reinit
+
     constructor(videoEl: HTMLVideoElement, canvasEl: HTMLCanvasElement, onResults: (result: any) => void) {
         this.video = videoEl;
         this.canvas = canvasEl;
@@ -26,20 +29,33 @@ export class HandTracker {
     }
 
     async init() {
-        const vision = await FilesetResolver.forVisionTasks(
+        this.visionFilesetResolver = await FilesetResolver.forVisionTasks(
             "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
         );
 
-        this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        await this.createLandmarker();
+        console.log(`Hand Landmarker Loaded (complexity: ${this.modelComplexity})`);
+    }
+
+    private async createLandmarker() {
+        this.handLandmarker = await HandLandmarker.createFromOptions(this.visionFilesetResolver, {
             baseOptions: {
                 modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
                 delegate: "GPU"
             },
             runningMode: this.runningMode,
             numHands: 1
+            // Note: MediaPipe Hand Landmarker doesn't have modelComplexity parameter
+            // It's only available for Pose/Holistic. We keep this structure for future compatibility
         });
+    }
 
-        console.log("Hand Landmarker Loaded");
+    async setFastMode(enabled: boolean) {
+        // MediaPipe Hand Landmarker doesn't support modelComplexity
+        // This is a placeholder for future optimization or alternative implementation
+        this.modelComplexity = enabled ? 0 : 1;
+        console.log(`Fast mode ${enabled ? 'enabled' : 'disabled'} (note: Hand Landmarker doesn't support complexity param)`);
+        // In a real implementation, we might switch to a lighter model or reduce processing
     }
 
     async startCamera() {

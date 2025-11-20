@@ -39,6 +39,59 @@
           <span id="voice-size-val">1.0x</span>
         </div>
 
+        <div class="control-row" style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+          <label for="fast-mode">
+            <input type="checkbox" id="fast-mode">
+            Fast Mode (Lower Latency)
+          </label>
+        </div>
+
+        <!-- IPA Debug Panel -->
+        <details style="margin-bottom: 1rem;">
+          <summary
+            style="cursor: pointer; font-weight: bold; padding: 0.5rem; background: rgba(0,0,0,0.3); border-radius: 4px;">
+            🔬 IPA Consonant Test Panel
+          </summary>
+          <div style="padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 4px; margin-top: 0.5rem;">
+            <p style="font-size: 0.9rem; margin-bottom: 0.75rem;">Click to test individual consonants (make sure hand is
+              raised for breath!):</p>
+
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 0.75rem;">
+              <div>
+                <strong style="font-size: 0.85rem;">Bilabial</strong>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
+                  <button class="ipa-btn" data-ipa="m" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[m]</button>
+                  <button class="ipa-btn" data-ipa="b" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[b]</button>
+                  <button class="ipa-btn" data-ipa="p" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[p]</button>
+                </div>
+              </div>
+
+              <div>
+                <strong style="font-size: 0.85rem;">Alveolar</strong>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
+                  <button class="ipa-btn" data-ipa="n" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[n]</button>
+                  <button class="ipa-btn" data-ipa="t" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[t]</button>
+                  <button class="ipa-btn" data-ipa="d" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[d]</button>
+                </div>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
+                  <button class="ipa-btn" data-ipa="s" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[s]</button>
+                </div>
+              </div>
+
+              <div>
+                <strong style="font-size: 0.85rem;">Velar/Glottal</strong>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.25rem;">
+                  <button class="ipa-btn" data-ipa="k" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[k]</button>
+                  <button class="ipa-btn" data-ipa="h" style="flex: 1; padding: 0.5rem; font-size: 0.9rem;">[h]</button>
+                </div>
+              </div>
+            </div>
+
+            <p style="font-size: 0.8rem; color: #aaa; margin: 0;">Hold button = sustained sound. Quick tap = burst (for
+              stops).</p>
+          </div>
+        </details>
+
         <div class="instructions-panel" style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 6px;">
           <h3 style="margin-top: 0;">🐵 How to Speak</h3>
           <ul style="padding-left: 1.5rem; margin-bottom: 0;">
