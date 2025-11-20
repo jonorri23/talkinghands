@@ -1,8 +1,9 @@
 import './style.css'
-import { AudioEngine } from './audio/AudioEngine';
+import { AudioEngine, type MonkeyState } from './audio/AudioEngine';
 import { HandTracker } from './vision/HandTracker';
 import { HandAnalyzer } from './vision/HandAnalyzer';
 import { VowelSpace } from './audio/VowelSpace';
+import { ConsonantDetector } from './vision/ConsonantDetector';
 import type { ArticulatoryState } from './audio/ArticulatorSynth';
 
 const startBtn = document.getElementById('startBtn') as HTMLButtonElement;
@@ -19,7 +20,7 @@ const latencyEl = document.getElementById('latency-display') as HTMLSpanElement;
 const audio = new AudioEngine();
 let tracker: HandTracker;
 
-let currentMode: 'simple' | 'advanced' | 'bio' | 'articulatory' = 'advanced';
+let currentMode: 'simple' | 'advanced' | 'bio' | 'articulatory' | 'monkey' = 'advanced';
 let currentSound: 'raw' | 'clean' | 'fm' = 'raw';
 let isPerfMode = false;
 
@@ -37,17 +38,51 @@ presetBtns.forEach(btn => {
     presetBtns.forEach(b => b.classList.remove('active'));
     target.classList.add('active');
 
+    // Set audio preset for special modes
+    if (preset === 'monkey') {
+      audio.setPreset('monkey');
+    } else if (preset === 'articulatory') {
+      audio.setPreset('articulatory');
+    } else if (preset === 'bio') {
+      audio.setPreset('bio');
+    }
+
     // Show/Hide mode-specific UI
     const bioTweaks = document.getElementById('bio-tweaks');
     const artHint = document.querySelector('.articulatory-hint') as HTMLElement;
+    const monkeyControls = document.getElementById('monkey-controls');
 
     if (bioTweaks) bioTweaks.style.display = preset === 'bio' ? 'flex' : 'none';
+
+    if (monkeyControls) {
+      monkeyControls.style.display = preset === 'monkey' ? 'block' : 'none';
+    }
+
     if (artHint) {
-      artHint.style.display = preset === 'articulatory' ? 'block' : 'none';
-      artHint.innerText = "💡 TILT hand FORWARD to breathe out / speak";
+      if (preset === 'articulatory') {
+        artHint.style.display = 'block';
+        artHint.innerText = "💡 TILT hand FORWARD to breathe out / speak";
+      } else {
+        // Monkey mode has its own panel now, so hide hint for it too
+        artHint.style.display = 'none';
+      }
     }
   });
 });
+
+
+
+// Monkey Mode Controls
+const voiceSizeSlider = document.getElementById('voice-size') as HTMLInputElement;
+const voiceSizeVal = document.getElementById('voice-size-val') as HTMLSpanElement;
+
+if (voiceSizeSlider) {
+  voiceSizeSlider.addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    voiceSizeVal.innerText = val.toFixed(2) + 'x';
+    audio.setVoiceSize(val);
+  });
+}
 
 // UI Event Listeners - Sound (Waveform) Buttons
 soundBtns.forEach(btn => {
@@ -150,7 +185,39 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
   // 3. Vowel Mapping based on Mode
   let f1, f2, f3, vowelName;
 
-  if (currentMode === 'articulatory') {
+  if (currentMode === 'monkey') {
+    // --- Monkey Mode ---
+    // NEW ERGONOMIC CONTROLS:
+    // - Vertical hand position (Y) = Breath/Voicing
+    // - Hand rotation (roll) = Pitch
+    // - Hand X/Y spatial position = Vowel quality
+
+    const monkeyState: MonkeyState = {
+      breathAmount: state.breathAmount,         // From vertical Y (raise hand to speak)
+      pitchMultiplier: state.pitchMultiplier,   // From hand roll (twist for pitch)
+      vowelBackness: state.tongueBackness,      // Ring finger extension (0=front, 1=back)
+      vowelHeight: state.tongueHeight,          // Middle finger extension (0=low, 1=high)
+      consonant: ConsonantDetector.detect(state) // Phase 2: Consonant detection
+    };
+
+
+    audio.updateMonkey(monkeyState);
+
+    // Display info
+    const basePitch = 150;
+    const actualPitch = Math.round(basePitch * state.pitchMultiplier);
+    pitchValEl.innerText = actualPitch.toString();
+
+    // Show breath level and vowel
+    const breathPercent = Math.round(state.breathAmount * 100);
+    const formants = VowelSpace.getFormants(state.tongueBackness, 1 - state.tongueHeight);
+    vowelName = `${VowelSpace.getNearestVowel(formants.f1, formants.f2)} (Breath: ${breathPercent}%)`;
+
+    // Don't override formants, they're set in updateMonkey
+    vowelValEl.innerText = vowelName;
+    return;
+
+  } else if (currentMode === 'articulatory') {
     // --- Articulatory Mode ---
     const lipClosure = Math.min(Math.max((0.1 - state.pinchDistance) / 0.07, 0), 1);
 

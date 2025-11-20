@@ -1,7 +1,19 @@
 import { EnergyEnvelope } from './EnergyEnvelope';
 import { ArticulatorSynth, type ArticulatoryState } from './ArticulatorSynth';
+import { GlottalSource } from './GlottalSource';
+import type { ConsonantGesture } from '../vision/ConsonantDetector';
+import { CONSONANTS } from './IPAConsonants';
 
-export type PresetName = 'clean' | 'fm' | 'raw' | 'bio' | 'articulatory';
+export type PresetName = 'raw' | 'clean' | 'fm' | 'bio' | 'articulatory' | 'monkey';
+
+// Monkey Mode State
+export interface MonkeyState {
+    breathAmount: number;      // 0-1
+    pitchMultiplier: number;   // 0.5-2.0
+    vowelBackness: number;     // 0-1
+    vowelHeight: number;       // 0-1
+    consonant?: ConsonantGesture; // Phase 2: Consonant gesture
+}
 
 export class AudioEngine {
     private audioContext: AudioContext | null = null;
@@ -29,6 +41,10 @@ export class AudioEngine {
     private energyEnvelope: EnergyEnvelope | null = null;
     private glottalGain: GainNode | null = null; // Voicing amount
     private aspirationGain: GainNode | null = null; // Noise amount
+
+    // Monkey Mode
+    private glottalSource: GlottalSource | null = null;
+    private voiceSizeMultiplier: number = 1.0; // For voice character scaling
 
     private currentPreset: PresetName = 'raw';
 
@@ -110,6 +126,9 @@ export class AudioEngine {
         this.aspirationGain = this.audioContext.createGain();
         this.aspirationGain.gain.value = 0;
 
+        // --- Monkey Mode Components ---
+        this.glottalSource = new GlottalSource(this.audioContext);
+
         // Initialize Noise
         this.initNoise();
 
@@ -161,6 +180,11 @@ export class AudioEngine {
         if (this.glottalGain) this.glottalGain.disconnect();
         if (this.aspirationGain) this.aspirationGain.disconnect();
 
+        // Disconnect Monkey Mode source
+        if (this.glottalSource) {
+            try { this.glottalSource.output.disconnect(); } catch (e) { }
+        }
+
         // 2. Create new source
         this.mainOscillator = this.audioContext.createOscillator();
         this.mainOscillator.frequency.value = 150;
@@ -192,6 +216,33 @@ export class AudioEngine {
 
             // Set Master Gain to 1 (Volume controlled by Envelope)
             this.masterGain!.gain.setValueAtTime(1.0, now);
+
+        } else if (name === 'monkey') {
+            // --- Monkey Mode ---
+            // Use GlottalSource instead of raw oscillator
+            // Route: GlottalSource -> Formants -> GlobalLPF -> Master
+            this.glottalSource!.output.connect(this.oralGain!);
+
+            // Connect for Consonants
+            // Glottal -> Nasal Filter (for [m], [n])
+            this.glottalSource!.output.connect(this.nasalFilter!);
+
+            // Noise -> Fricative Filter (for [s], [t], [k] bursts)
+            if (this.noiseGain) {
+                this.noiseGain.connect(this.fricativeFilter!);
+                // Ensure noise is running (it loops)
+            }
+
+            // Reset gains
+            this.oralGain!.gain.value = 1;
+            this.nasalGain!.gain.value = 0;
+            this.fricativeGain!.gain.value = 0;
+
+            // Open LPF
+            this.globalLpf!.frequency.setValueAtTime(20000, now);
+
+            // Master gain controlled by breath amount
+            this.masterGain!.gain.setValueAtTime(0.0, now);
 
         } else if (name === 'bio') {
             // Bio Mode (Legacy)
@@ -380,5 +431,123 @@ export class AudioEngine {
                 this.energyEnvelope.trigger(1.0);
             }
         }
+    }
+
+    // --- Monkey Mode Update ---
+    updateMonkey(state: MonkeyState) {
+        if (this.currentPreset !== 'monkey' || !this.audioContext || !this.glottalSource) return;
+
+        const now = this.audioContext.currentTime;
+        const ramp = 0.01; // Low latency response
+
+        // --- 1. Base Voice (Vowels) ---
+
+        // Breath -> Voicing Amount
+        // FIX: Make voicing come in sooner (power < 1 shifts curve left)
+        const voicingAmount = Math.pow(state.breathAmount, 0.7);
+        this.glottalSource.setVoicingAmount(voicingAmount);
+
+        // Breath -> Output Level (amplitude)
+        const outputLevel = Math.pow(state.breathAmount, 1.5);
+        this.glottalSource.setOutputLevel(outputLevel);
+
+        // Master gain also scales with breath
+        this.masterGain!.gain.setTargetAtTime(outputLevel, now, ramp);
+
+        // Amplitude-dependent breathiness
+        // FIX: Reduce breathiness more aggressively
+        const breathiness = Math.pow(Math.max(0, 1 - state.breathAmount * 1.5), 2.0);
+        this.glottalSource.setBreathiness(breathiness);
+
+        // Pitch from pitchMultiplier
+        const basePitch = 150;
+        const pitch = basePitch * state.pitchMultiplier;
+        this.glottalSource.setPitch(pitch);
+
+        // Vowel Formants
+        const f1Base = 250 + (state.vowelHeight * 600);
+        const f2Base = 800 + (state.vowelBackness * 1600);
+        const f3Base = 2200 + (state.vowelBackness * 500);
+
+        const f1 = f1Base * this.voiceSizeMultiplier;
+        const f2 = f2Base * this.voiceSizeMultiplier;
+        const f3 = f3Base * this.voiceSizeMultiplier;
+
+        this.setFormants(f1, f2, f3);
+
+        // --- 2. Consonant Logic ---
+        let targetOralGain = 1.0;
+        let targetNasalGain = 0.0;
+        let targetFricativeGain = 0.0;
+
+        if (state.consonant && state.consonant.type !== 'none') {
+            const gesture = state.consonant;
+
+            // Map gesture to IPA phoneme
+            // This is a simplified mapping for Phase 1
+            let phoneme = '';
+
+            if (gesture.type === 'bilabial') {
+                // Pinch -> [m] (nasal) or [b]/[p] (stop)
+                // For now, let's make pinch = [m] if voiced, [p] if whisper?
+                // Or just [m] for continuous pinch, and [b]/[p] on release (burst)
+                // Let's start with [m] for continuous pinch
+                phoneme = 'm';
+            } else if (gesture.type === 'alveolar') {
+                // Pointing -> [n] or [s] or [t]/[d]
+                // Let's map continuous pointing to [s] (fricative)
+                phoneme = 's';
+            } else if (gesture.type === 'velar') {
+                // Pinky -> [k] (stop)
+                // Stops are hard to sustain. Maybe [ng]?
+                // For now, let's try to make it a sustained closure for [k] preparation
+                phoneme = 'k';
+            } else if (gesture.type === 'glottal') {
+                // Open -> [h]
+                phoneme = 'h';
+            }
+
+            if (phoneme && CONSONANTS[phoneme]) {
+                const params = CONSONANTS[phoneme];
+                const closure = gesture.closure; // 0-1 intensity of gesture
+
+                // Apply consonant parameters blended by closure amount
+
+                // Oral Gain: Close mouth for stops/nasals
+                // If params.oralGain is 0, we want to go to 0 as closure -> 1
+                targetOralGain = 1.0 - (closure * (1.0 - params.oralGain));
+
+                // Nasal Gain: Open nose for nasals
+                targetNasalGain = closure * params.nasalGain;
+
+                // Fricative Gain: Noise for fricatives
+                targetFricativeGain = closure * (params.manner === 'fricative' ? 1.0 : 0.0);
+
+                // Filter settings for fricatives
+                if (params.manner === 'fricative' || params.manner === 'stop') {
+                    if (this.fricativeFilter) {
+                        // Update filter freq
+                        this.fricativeFilter.type = 'bandpass';
+                        this.fricativeFilter.frequency.setTargetAtTime(params.noiseFreq, now, ramp);
+                        this.fricativeFilter.Q.setTargetAtTime(params.noiseBandwidth, now, ramp);
+                    }
+                }
+
+                // Special case: [s] needs high gain on noise
+                if (phoneme === 's') {
+                    targetFricativeGain *= 0.5; // Adjust level
+                }
+            }
+        }
+
+        // Apply Gains
+        if (this.oralGain) this.oralGain.gain.setTargetAtTime(targetOralGain, now, ramp);
+        if (this.nasalGain) this.nasalGain.gain.setTargetAtTime(targetNasalGain, now, ramp);
+        if (this.fricativeGain) this.fricativeGain.gain.setTargetAtTime(targetFricativeGain, now, ramp);
+    }
+
+    // Voice Size Control (for UI slider)
+    setVoiceSize(multiplier: number) {
+        this.voiceSizeMultiplier = Math.max(0.8, Math.min(1.2, multiplier));
     }
 }

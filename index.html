@@ -20,13 +20,40 @@
         <button class="preset-btn active" data-preset="advanced">Advanced (2D Vowels)</button>
         <button class="preset-btn" data-preset="bio">Bio (Speech Physics)</button>
         <button class="preset-btn" data-preset="articulatory">Articulatory (Breath)</button>
+        <button class="preset-btn" data-preset="monkey">🐵 Monkey (Speech AI)</button>
       </div>
 
       <div class="sound-group">
         <span>Sound:</span>
-        <button class="sound-btn active" data-sound="raw">Raw</button>
-        <button class="sound-btn" data-sound="clean">Clean</button>
-        <button class="sound-btn" data-sound="fm">FM</button>
+        <button class="sound-btn active" data-sound="raw">Raw Sawtooth</button>
+        <button class="sound-btn" data-sound="clean">Clean Sine</button>
+        <button class="sound-btn" data-sound="fm">FM Bell</button>
+      </div>
+
+      <!-- Monkey Mode Specific Controls -->
+      <div id="monkey-controls"
+        style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(255,255,255,0.05); border-radius: 8px;">
+        <div class="control-row" style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+          <label for="voice-size">Voice Size:</label>
+          <input type="range" id="voice-size" min="0.8" max="1.2" step="0.01" value="1.0">
+          <span id="voice-size-val">1.0x</span>
+        </div>
+
+        <div class="instructions-panel" style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 6px;">
+          <h3 style="margin-top: 0;">🐵 How to Speak</h3>
+          <ul style="padding-left: 1.5rem; margin-bottom: 0;">
+            <li><strong>✋ Breath:</strong> Raise hand UP to speak, lower to whisper/silence.</li>
+            <li><strong>🔄 Pitch:</strong> Tilt hand FORWARD (low) or BACK (high).</li>
+            <li><strong>🗣️ Vowels:</strong> Move hand around (Left=EE, Right=OO, Down=AH).</li>
+            <li><strong>🤐 Consonants:</strong>
+              <ul style="margin-top: 0.5rem;">
+                <li><strong>Pinch:</strong> [m] (hum), [b]/[p] (pop)</li>
+                <li><strong>Point:</strong> [s] (hiss), [t]/[d] (tap)</li>
+                <li><strong>Pinky:</strong> [k] (back of throat)</li>
+              </ul>
+            </li>
+          </ul>
+        </div>
       </div>
 
       <div class="tweaks" id="bio-tweaks" style="display: none;">

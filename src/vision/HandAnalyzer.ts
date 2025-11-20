@@ -5,11 +5,15 @@ export interface HandState {
     openness: number;
     palmPosition: { x: number, y: number, z: number };
     tilt: number;
-    pitch: number;
+    pitch: number; // Forward/back tilt (legacy, kept for compatibility)
     tongueHeight: number;
     tongueBackness: number;
     tongueTip: number;
     pinchVelocity: number;
+
+    // Monkey Mode Controls (Swapped for better ergonomics)
+    breathAmount: number;      // 0-1 from vertical Y (low hand = 0, high hand = 1)
+    pitchMultiplier: number;   // 0.5-2.0 from hand roll/rotation
 }
 
 export class HandAnalyzer {
@@ -87,6 +91,19 @@ export class HandAnalyzer {
         );
         const tongueTip = Math.min(Math.max((pinkyDist / handSize - 0.8) / 0.8, 0), 1);
 
+        // === MONKEY MODE: Swapped Ergonomic Controls ===
+
+        // Breath Amount: Vertical Y position (0.1 = low/silence, 0.9 = high/full voice)
+        // Inverted: higher hand (lower Y value) = more breath
+        const breathAmount = Math.min(Math.max((0.9 - wrist.y) / 0.8, 0), 1);
+
+        // Pitch Multiplier: Forward/Backward tilt (0.7 to 1.5x)
+        // pitch metric: positive = tilted back, negative = tilted forward
+        // Neutral (flat hand) = 1.0x base pitch
+        // Tilt forward = lower pitch, tilt back = higher pitch
+        // Map pitch range of -0.3 to +0.3 → multiplier 0.7 to 1.5
+        const pitchMultiplier = 1.0 + (pitch * 1.3); // Centered at 1.0, range ~0.7-1.5
+
         return {
             isPinching,
             pinchDistance: pinchDist,
@@ -98,7 +115,10 @@ export class HandAnalyzer {
             tongueHeight,
             tongueBackness,
             tongueTip,
-            pinchVelocity
+            pinchVelocity,
+            breathAmount,
+            pitchMultiplier
         };
     }
 }
+
