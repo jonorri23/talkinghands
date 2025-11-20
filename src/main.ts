@@ -162,15 +162,11 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
     // Left (1) = Back. Right (0) = Front.
     const tongueBack = 1 - state.palmPosition.x;
 
-    // 4. Tongue Tip (Index Finger)
-    // HandAnalyzer now returns this (0..1)
-    // If not available (old analyzer), default to 0.
-    const tongueTip = (state as any).tongueTip || 0;
-
-    // 5. Voicing (Roll)
+    // 4. Voicing (Roll)
+    // Roll > 0.5 = Flat (Voiced). Roll < 0.3 = Side (Unvoiced).
     const isVoiced = state.tilt > 0.4;
 
-    // 6. Plosive Trigger
+    // 5. Plosive Trigger
     // Detect rapid opening: dClosure/dt < -threshold
     // Simple state history
     if (!(window as any).lastClosure) (window as any).lastClosure = 0;
@@ -180,14 +176,13 @@ function handleHandData(data: { landmarks: any[] | null, latency: number }) {
     // If we were closed (>0.8) and now opening fast (dClosure < -0.1)
     const plosiveTrigger = (closure < 0.8 && (window as any).lastClosure > 0.8 && dClosure < -0.05);
 
-    // Map Tongue to Formants
-    const formants = VowelSpace.getFormants(tongueBack, 1 - tongueHeight);
+    // Map Tongue to Formants (Vowel Space)
+    // We reuse VowelSpace but interpret X/Y as Back/Height
+    const formants = VowelSpace.getFormants(tongueBack, 1 - tongueHeight); // Invert Height for F1 mapping
 
     audio.updateBio({
       lipClosure: closure,
       tongueHeight: tongueHeight,
-      tongueBackness: tongueBack,
-      tongueTip: tongueTip,
       isVoiced: isVoiced,
       plosiveTrigger: plosiveTrigger
     });

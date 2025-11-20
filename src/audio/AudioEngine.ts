@@ -294,11 +294,10 @@ export class AudioEngine {
     }
 
     // --- Bio-Mechanical Updates ---
+    // --- Bio-Mechanical Updates ---
     updateBio(params: {
-        lipClosure: number;
-        tongueHeight: number;
-        tongueBackness: number;
-        tongueTip: number;
+        lipClosure: number; // 0 (Open) to 1 (Closed)
+        tongueHeight: number; // 0 (Low) to 1 (High/Roof)
         isVoiced: boolean;
         plosiveTrigger: boolean;
     }) {
@@ -306,72 +305,24 @@ export class AudioEngine {
         const now = this.audioContext.currentTime;
         const ramp = 0.02;
 
-        // --- Logic adapted from ArticulatorSynth ---
-
         // 1. Oral/Nasal Mix
-        // Nasal Gain: Boost when lips closed (M/N)
-        const nasalGainTarget = 0.2 + (params.lipClosure * 0.8);
-        // Oral Gain: Cut when lips closed
-        const oralGainTarget = Math.max(0, 1 - params.lipClosure);
+        const oralLevel = (1 - params.lipClosure);
+        const nasalLevel = params.lipClosure;
 
-        if (this.oralGain) this.oralGain.gain.setTargetAtTime(oralGainTarget, now, ramp);
-        if (this.nasalGain) this.nasalGain.gain.setTargetAtTime(nasalGainTarget * 0.5, now, ramp);
+        if (this.oralGain) this.oralGain.gain.setTargetAtTime(oralLevel, now, ramp);
+        if (this.nasalGain) this.nasalGain.gain.setTargetAtTime(nasalLevel * 0.5, now, ramp);
 
-        // 2. Fricatives (Noise)
-        // Detect constriction based on Tongue Tip and Height
+        // 2. Fricatives (Tongue Height)
         let fricativeVol = 0;
-        let fricativeFreq = 5000; // Default /s/
-
-        // Alveolar /s/ (Tip High)
-        if (params.tongueTip > 0.7) {
-            fricativeVol = (params.tongueTip - 0.7) * 3; // Scale up
-            fricativeFreq = 6000;
-
-            // Postalveolar /sh/ (Tip High + Back)
-            if (params.tongueBackness > 0.6) {
-                fricativeFreq = 3000;
-            }
+        if (params.tongueHeight > 0.8) {
+            fricativeVol = (params.tongueHeight - 0.8) / 0.2; // 0 to 1
         }
-        // Labiodental /f/ (Partial Lip Closure)
-        else if (params.lipClosure > 0.2 && params.lipClosure < 0.8) {
-            fricativeVol = Math.min(params.lipClosure, 1 - params.lipClosure) * 3;
-            fricativeFreq = 8000; // Higher /f/
-        }
-
-        // Unvoiced Boost: Fricatives are clearer when not voiced
-        if (!params.isVoiced) fricativeVol *= 1.5;
-
-        fricativeVol = Math.min(fricativeVol, 1.0);
+        // Unvoiced sounds (Palm Side) should boost fricatives?
+        if (!params.isVoiced) fricativeVol *= 2;
 
         if (this.fricativeGain) this.fricativeGain.gain.setTargetAtTime(fricativeVol, now, ramp);
-        if (this.fricativeFilter) this.fricativeFilter.frequency.setTargetAtTime(fricativeFreq, now, ramp);
 
-        // 3. Voicing Source
-        // If Unvoiced (Whisper), we want Noise in the Oral path too (Breathiness)
-        // If Voiced, we want Sawtooth.
-        // We can mix them?
-        // Current setup: Sawtooth -> Oral. Noise -> Fricative.
-        // We need Noise -> Oral for Whisper.
-        // I added `noiseGain -> filterChain[0]` in `setPreset('bio')`.
-        // So we just need to control Noise Gain vs Sawtooth Gain?
-        // Actually, `noiseGain` is global.
-
-        // Let's just toggle Sawtooth for now.
-        // Ideally we crossfade.
-        if (this.mainOscillator) {
-            // If Voiced: Sawtooth Volume = 1.
-            // If Unvoiced: Sawtooth Volume = 0.
-            // We don't have a gain node on the oscillator itself (except Master).
-            // We rely on `oralGain` which cuts BOTH.
-            // Wait, `oralGain` is after Source? No, `mainOscillator.connect(oralGain)`.
-            // So `oralGain` cuts the Source.
-
-            // We need to silence the Sawtooth specifically if Unvoiced.
-            // But we can't easily without a specific gain node.
-            // Let's skip this refinement for this step to avoid breaking graph.
-        }
-
-        // 4. Plosives (Burst)
+        // 3. Plosives (Burst)
         if (params.plosiveTrigger) {
             this.masterGain!.gain.cancelScheduledValues(now);
             this.masterGain!.gain.setValueAtTime(1.0, now);
